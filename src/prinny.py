@@ -153,6 +153,7 @@ class Prinny(QWidget):
 
         # --- Speech bubbles ---
         self._bubble         = None
+        self._alert_bubble   = None   # bulle persistante RAM (séparée des bulles normales)
         self._quotes         = self._load_quotes()
         self._quotes_enabled = False
 
@@ -167,6 +168,15 @@ class Prinny(QWidget):
         self._media_timer = QTimer(self)
         self._media_timer.timeout.connect(self._check_media)
         self._media_timer.start(5000)
+
+        # --- RAM alert ---
+        self._ram_alert_enabled   = self.config.get("ram_alert_enabled")
+        self._ram_alert_threshold = self.config.get("ram_alert_threshold")
+        self._ram_alert_triggered = False  # True quand alerte déjà envoyée
+
+        self._ram_timer = QTimer(self)
+        self._ram_timer.timeout.connect(self._check_ram)
+        self._ram_timer.start(10000)  # vérifie toutes les 10 secondes
 
         # --- Info window (lazy init) ---
         self._info_window = None
@@ -536,10 +546,12 @@ class Prinny(QWidget):
             self._set_anim("fall")
 
     def moveEvent(self, event) -> None:
-        """Keep the speech bubble above Prinny when he moves."""
+        """Keep all speech bubbles above Prinny when he moves."""
         super().moveEvent(event)
         if self._bubble and not sip.isdeleted(self._bubble):
             self._bubble.update_position(self)
+        if self._alert_bubble and not sip.isdeleted(self._alert_bubble):
+            self._alert_bubble.update_position(self)
 
 
     # -----------------------------------------------------------------------
@@ -569,17 +581,33 @@ class Prinny(QWidget):
 
     def _show_bubble(self, text: str, duration_ms: int = 5000) -> None:
         """
-        Display a speech bubble above Prinny's head.
+        Display a temporary speech bubble above Prinny's head.
+
+        If a RAM alert bubble is active, it is hidden during the
+        temporary bubble and restored automatically afterward.
 
         Args:
             text: Text to display in the bubble.
             duration_ms: How long to show the bubble in milliseconds.
         """
         self._close_bubble()
+
+        # Cacher temporairement la bulle d alerte si elle est active
+        if self._alert_bubble and not sip.isdeleted(self._alert_bubble):
+            self._alert_bubble.hide()
+
         self._bubble = SpeechBubble(text, self)
         self._bubble.update_position(self)
         self._bubble.show()
-        QTimer.singleShot(duration_ms, self._close_bubble)
+
+        def _restore_alert():
+            self._close_bubble()
+            # Remettre la bulle d alerte si elle existe encore
+            if self._alert_bubble and not sip.isdeleted(self._alert_bubble):
+                self._alert_bubble.show()
+                self._alert_bubble.update_position(self)
+
+        QTimer.singleShot(duration_ms, _restore_alert)
 
     def _show_random_quote(self) -> None:
         """Show a random quote bubble if quotes are enabled."""
@@ -625,6 +653,64 @@ class Prinny(QWidget):
             self._show_bubble(f"🎵 {current}", duration_ms=5000)
 
 
+    def _check_ram(self) -> None:
+        """
+        Check RAM usage and manage the persistent alert bubble.
+
+        - If RAM >= threshold and alert not yet triggered:
+            show alert bubble, play sound, trigger fail animation.
+        - If RAM >= threshold and already triggered:
+            just update the percentage in the bubble.
+        - If RAM < threshold:
+            close the alert bubble and reset the flag.
+        """
+        if not self._ram_alert_enabled:
+            self._close_alert_bubble()
+            return
+
+        from system_stats import get_ram_usage
+        ram = get_ram_usage()
+        message = t("alert_ram").format(percent=int(ram["percent"]))
+
+        if ram["percent"] >= self._ram_alert_threshold:
+            if not self._ram_alert_triggered:
+                # Première fois qu on passe le seuil
+                self._ram_alert_triggered = True
+                self._play_drag_sound()
+                self._set_anim("fail")
+                self._fail_active = True
+                QTimer.singleShot(3000, self._end_fail)
+                self._show_alert_bubble(message)
+            else:
+                # Déjà déclenché : on met juste le % à jour
+                if self._alert_bubble and not sip.isdeleted(self._alert_bubble):
+                    self._alert_bubble.update_text(message)
+                    self._alert_bubble.update_position(self)
+        else:
+            # RAM repassée sous le seuil
+            self._ram_alert_triggered = False
+            self._close_alert_bubble()
+
+    def _show_alert_bubble(self, text: str) -> None:
+        """
+        Show the persistent alert bubble above Prinny.
+
+        Unlike normal bubbles, this one stays until RAM drops below threshold.
+
+        Args:
+            text: Alert message to display.
+        """
+        self._close_alert_bubble()
+        self._alert_bubble = SpeechBubble(text, self)
+        self._alert_bubble.update_position(self)
+        self._alert_bubble.show()
+
+    def _close_alert_bubble(self) -> None:
+        """Safely close and clear the persistent alert bubble."""
+        if self._alert_bubble and not sip.isdeleted(self._alert_bubble):
+            self._alert_bubble.close()
+        self._alert_bubble = None
+
     # -----------------------------------------------------------------------
     # Context menu
     # -----------------------------------------------------------------------
@@ -665,6 +751,11 @@ class Prinny(QWidget):
         media_action = QAction(t("menu_show_media"), self, checkable=True)
         media_action.setChecked(self._media_enabled)
         menu.addAction(media_action)
+
+        # RAM alert toggle
+        ram_action = QAction(t("menu_ram_alert"), self, checkable=True)
+        ram_action.setChecked(self._ram_alert_enabled)
+        menu.addAction(ram_action)
 
         # Mute toggle
         mute_label  = t("menu_mute") if not self._muted else t("menu_unmute")
@@ -724,6 +815,15 @@ class Prinny(QWidget):
         elif chosen == media_action:
             self._media_enabled = media_action.isChecked()
             self.config.set("media_enabled", self._media_enabled)
+        elif chosen == ram_action:
+            self._ram_alert_enabled = ram_action.isChecked()
+            self.config.set("ram_alert_enabled", self._ram_alert_enabled)
+            if not self._ram_alert_enabled:
+                # On désactive : fermer la bulle immédiatement
+                self._close_alert_bubble()
+            else:
+                # On réactive : reset du flag pour que l alerte se déclenche à nouveau
+                self._ram_alert_triggered = False
         elif chosen == credits_action:
             self._show_credits()
         elif chosen == quit_action:

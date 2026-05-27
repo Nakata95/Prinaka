@@ -9,11 +9,13 @@ Settings are saved automatically on each change and persist between sessions.
 Registry path: HKEY_CURRENT_USER/Software/NakaCorp/Prinaka
 
 Stored settings:
-- skin         : active skin name (str)
-- volume       : sound volume 0-100 (int)
-- muted        : mute state (bool)
-- language     : active language code (str)
-- media_enabled: whether to display current media (bool)
+- skin               : active skin name (str)
+- volume             : sound volume 0-100 (int)
+- muted              : mute state (bool)
+- language           : active language code (str)
+- media_enabled      : whether to display current media (bool)
+- ram_alert_enabled  : whether to show RAM alert notifications (bool)
+- ram_alert_threshold: RAM percentage threshold for alerts (int)
 """
 
 from PyQt5.QtCore import QSettings
@@ -24,11 +26,13 @@ from PyQt5.QtCore import QSettings
 # ---------------------------------------------------------------------------
 
 DEFAULTS = {
-    "skin":          "default",
-    "volume":        50,
-    "muted":         False,
-    "language":      "en",
-    "media_enabled": True,
+    "skin":                "default",
+    "volume":              50,
+    "muted":               False,
+    "language":            "en",
+    "media_enabled":       True,
+    "ram_alert_enabled":   True,
+    "ram_alert_threshold": 80,
 }
 
 

@@ -120,3 +120,19 @@ class SpeechBubble(QWidget):
             y = center.y() + prinny_widget.height() // 2 + 10
 
         self.move(x, y)
+
+    def update_text(self, text: str) -> None:
+        """
+        Update the bubble text and resize accordingly.
+
+        Args:
+            text: New text to display.
+        """
+        self.label.setText(text)
+        self.label.adjustSize()
+
+        w = self.label.width()  + self.PADDING * 2
+        h = self.label.height() + self.PADDING * 2
+        self.resize(w, h + self.ARROW_HEIGHT)
+        self.label.move(self.PADDING, self.PADDING)
+        self.update()

@@ -7,6 +7,7 @@
     "menu_express":         "🐧 Exprime-toi !",
     "menu_punish":          "🐧 Punis !",
     "menu_show_media":      "🎵 Afficher média en cours",
+    "menu_ram_alert":       "⚠️ Alerte RAM (≥80%)",
     "menu_mute":            "🔇 Passer en muet",
     "menu_unmute":          "🔊 Activer le son",
     "menu_change_skin":     "Changer de skin",
@@ -27,6 +28,8 @@
     "info_download":        "⬇️ Reçu",
     "info_disk_free":       "Libre",
     "info_na":              "N/A",
+
+    "alert_ram":            "⚠️ RAM critique : {percent}% utilisée !",
 
     "credits_title":        "Crédits",
     "credits_text":         "🐧 Prinaka\nDéveloppé par @Nakata95\n(https://github.com/Nakata95)\nAvec PyQt5",
