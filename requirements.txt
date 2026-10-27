@@ -1,0 +1,7 @@
+PyQt5>=5.15
+psutil
+pynput
+pypresence>=4.3
+wmi
+pywin32
+winsdk
