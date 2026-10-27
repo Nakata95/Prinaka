@@ -18,9 +18,9 @@ import os
 import random
 import json
 
-import sip
+from PyQt5 import sip
 from PyQt5.QtWidgets import (
-    QWidget, QLabel, QMenu, QSlider, QWidgetAction,
+    QWidget, QLabel, QMenu, QSlider, QWidgetAction, QHBoxLayout,
     QDialog, QVBoxLayout, QPushButton, QApplication, QAction
 )
 from PyQt5.QtCore import Qt, QTimer, QUrl, QPoint
@@ -31,6 +31,10 @@ from utils import resource_path, load_sprites, get_total_screen_rect, t, load_la
 from config import ConfigManager
 from media import get_current_media_info
 from speech_bubble import SpeechBubble
+from features import FeaturesMixin
+from discord_presence import (
+    DiscordPresenceManager, STATUS_TEXTS, find_profile, load_profiles,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -47,12 +51,16 @@ FALL_SMOOTH     = 0.5
 JUMP_VELOCITY   = -50
 GROUND_OFFSET   = 40        # px above the bottom of the screen
 
+# Discord Rich Presence is finished but hidden for now: set to True to bring
+# back the menu entry, the autostart and the background reconnection.
+PRESENCE_ENABLED = False
+
 
 # ---------------------------------------------------------------------------
 # Prinny widget
 # ---------------------------------------------------------------------------
 
-class Prinny(QWidget):
+class Prinny(FeaturesMixin, QWidget):
     """
     The main animated desktop buddy widget.
 
@@ -68,6 +76,7 @@ class Prinny(QWidget):
         "cake":      (165, 165),
         "gentleman": (165, 165),
         "kurtis":    (165, 165),
+        "summer":    (165, 165),
     }
 
     # --- System alert thresholds ---
@@ -110,6 +119,7 @@ class Prinny(QWidget):
 
         if self._sprites.get("idle"):
             self._label.setPixmap(self._sprites["idle"][0])
+        self._refresh_tray_icon()
 
         # --- Movement ---
         self.move(500, 200)
@@ -154,12 +164,6 @@ class Prinny(QWidget):
         # --- Speech bubbles ---
         self._bubble         = None
         self._alert_bubble   = None   # bulle persistante RAM (séparée des bulles normales)
-        self._quotes         = self._load_quotes()
-        self._quotes_enabled = False
-
-        self._speech_timer = QTimer(self)
-        self._speech_timer.timeout.connect(self._show_random_quote)
-        self._speech_timer.start(random.randint(30000, 40000))
 
         # --- Media tracking ---
         self._media_enabled = self.config.get("media_enabled")
@@ -169,17 +173,23 @@ class Prinny(QWidget):
         self._media_timer.timeout.connect(self._check_media)
         self._media_timer.start(5000)
 
-        # --- RAM alert ---
-        self._ram_alert_enabled   = self.config.get("ram_alert_enabled")
-        self._ram_alert_threshold = self.config.get("ram_alert_threshold")
-        self._ram_alert_triggered = False  # True quand alerte déjà envoyée
-
-        self._ram_timer = QTimer(self)
-        self._ram_timer.timeout.connect(self._check_ram)
-        self._ram_timer.start(10000)  # vérifie toutes les 10 secondes
+        # --- Quotes, reactions, alerts, do-not-disturb, tray (features.py) ---
+        self._init_features()
 
         # --- Info window (lazy init) ---
         self._info_window = None
+
+        # --- Discord Rich Presence ---
+        self._presence_manager = None
+        self._presence_window  = None
+        self._preview_popup    = None
+        if PRESENCE_ENABLED:
+            self._presence_manager = DiscordPresenceManager(self)
+            self._presence_manager.state_changed.connect(self._on_presence_state)
+            QApplication.instance().aboutToQuit.connect(self._presence_manager.shutdown)
+
+            if self.config.get("presence_autostart"):
+                QTimer.singleShot(3000, self._autostart_presence)
 
         # --- Main loop ---
         self._timer = QTimer(self)
@@ -558,21 +568,6 @@ class Prinny(QWidget):
     # Speech bubbles
     # -----------------------------------------------------------------------
 
-    def _load_quotes(self) -> list:
-        """
-        Load random quotes from the quotes.json file.
-
-        Returns:
-            List of quote strings, or empty list on error.
-        """
-        path = resource_path(os.path.join("assets", "quotes.json"))
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f).get("quotes", [])
-        except Exception as e:
-            print(f"[prinny] Failed to load quotes: {e}")
-            return []
-
     def _close_bubble(self) -> None:
         """Safely close and clear the current speech bubble."""
         if self._bubble and not sip.isdeleted(self._bubble):
@@ -590,6 +585,9 @@ class Prinny(QWidget):
             text: Text to display in the bubble.
             duration_ms: How long to show the bubble in milliseconds.
         """
+        if self._silenced():
+            return
+
         self._close_bubble()
 
         # Cacher temporairement la bulle d alerte si elle est active
@@ -609,35 +607,6 @@ class Prinny(QWidget):
 
         QTimer.singleShot(duration_ms, _restore_alert)
 
-    def _show_random_quote(self) -> None:
-        """Show a random quote bubble if quotes are enabled."""
-        if not self._quotes_enabled or not self._quotes:
-            self._speech_timer.start(random.randint(30000, 40000))
-            return
-
-        quote = random.choice(self._quotes)
-        self._show_bubble(quote, duration_ms=8000)
-
-        self._set_anim("hype")
-        self._hype_active = True
-        QTimer.singleShot(8000, self._end_hype)
-
-        self._speech_timer.start(random.randint(30000, 40000))
-
-    def toggle_quotes(self, enabled: bool) -> None:
-        """
-        Enable or disable random quote bubbles.
-
-        Args:
-            enabled: True to enable, False to disable.
-        """
-        self._quotes_enabled = enabled
-        if enabled:
-            self._speech_timer.start(random.randint(30000, 40000))
-        else:
-            self._speech_timer.stop()
-            self._close_bubble()
-
     # -----------------------------------------------------------------------
     # Media tracking
     # -----------------------------------------------------------------------
@@ -652,44 +621,6 @@ class Prinny(QWidget):
             self._last_media = current
             self._show_bubble(f"🎵 {current}", duration_ms=5000)
 
-
-    def _check_ram(self) -> None:
-        """
-        Check RAM usage and manage the persistent alert bubble.
-
-        - If RAM >= threshold and alert not yet triggered:
-            show alert bubble, play sound, trigger fail animation.
-        - If RAM >= threshold and already triggered:
-            just update the percentage in the bubble.
-        - If RAM < threshold:
-            close the alert bubble and reset the flag.
-        """
-        if not self._ram_alert_enabled:
-            self._close_alert_bubble()
-            return
-
-        from system_stats import get_ram_usage
-        ram = get_ram_usage()
-        message = t("alert_ram").format(percent=int(ram["percent"]))
-
-        if ram["percent"] >= self._ram_alert_threshold:
-            if not self._ram_alert_triggered:
-                # Première fois qu on passe le seuil
-                self._ram_alert_triggered = True
-                self._play_drag_sound()
-                self._set_anim("fail")
-                self._fail_active = True
-                QTimer.singleShot(3000, self._end_fail)
-                self._show_alert_bubble(message)
-            else:
-                # Déjà déclenché : on met juste le % à jour
-                if self._alert_bubble and not sip.isdeleted(self._alert_bubble):
-                    self._alert_bubble.update_text(message)
-                    self._alert_bubble.update_position(self)
-        else:
-            # RAM repassée sous le seuil
-            self._ram_alert_triggered = False
-            self._close_alert_bubble()
 
     def _show_alert_bubble(self, text: str) -> None:
         """
@@ -728,23 +659,45 @@ class Prinny(QWidget):
                 padding: 6px;
             }
             QMenu::item {
-                padding: 10px 30px;
+                padding: 9px 30px;
                 color: #e0e0e0;
+                border-radius: 6px;
             }
             QMenu::item:selected {
                 background-color: #3a3a3a;
             }
+            QMenu::item:disabled {
+                color: #777;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #333;
+                margin: 5px 10px;
+            }
         """)
 
         # --- Actions ---
-        info_action    = menu.addAction(t("menu_sys_info"))
+        info_action = menu.addAction(t("menu_sys_info"))
         menu.addSeparator()
-        idle_action    = menu.addAction(t("menu_stay_idle"))
-        walk_action    = menu.addAction(t("menu_walk_only"))
-        inspect_action = menu.addAction(t("menu_keep_busy"))
-        hype_action    = menu.addAction(t("menu_express"))
-        punish_action  = menu.addAction(t("menu_punish"))
-        reset_action   = menu.addAction(t("menu_free_action"))
+
+        # Behavior submenu (the forced state is checked)
+        behavior_actions = {}
+        behavior_menu = menu.addMenu(t("menu_behavior"))
+        for key, state in (
+            ("menu_free_action", None),
+            ("menu_stay_idle",   "idle"),
+            ("menu_walk_only",   "walk"),
+            ("menu_keep_busy",   "inspect_menu"),
+            ("menu_express",     "hype"),
+            ("menu_punish",      "fail"),
+        ):
+            action = QAction(t(key), self, checkable=True)
+            action.setChecked(self._forced_state == state)
+            behavior_menu.addAction(action)
+            behavior_actions[action] = state
+        handlers = {}
+        handlers.update(self._build_dialogue_menu(menu))
+        handlers.update(self._build_alert_menu(menu))
         menu.addSeparator()
 
         # Media toggle
@@ -752,38 +705,50 @@ class Prinny(QWidget):
         media_action.setChecked(self._media_enabled)
         menu.addAction(media_action)
 
-        # RAM alert toggle
-        ram_action = QAction(t("menu_ram_alert"), self, checkable=True)
-        ram_action.setChecked(self._ram_alert_enabled)
-        menu.addAction(ram_action)
-
         # Mute toggle
         mute_label  = t("menu_mute") if not self._muted else t("menu_unmute")
         mute_action = menu.addAction(mute_label)
 
-        # Volume slider
+        # Volume row: icon, slider, live percentage
+        volume_box = QWidget()
+        volume_box.setStyleSheet("background: transparent; color: #e0e0e0;")
+        volume_row = QHBoxLayout(volume_box)
+        volume_row.setContentsMargins(30, 4, 30, 4)
+        volume_icon  = QLabel("🔊")
+        volume_value = QLabel(f"{self._volume}%")
+        volume_value.setMinimumWidth(40)
         slider = QSlider(Qt.Horizontal)
         slider.setRange(0, 100)
         slider.setValue(self._volume)
         slider.valueChanged.connect(self.change_volume)
+        slider.valueChanged.connect(lambda v: volume_value.setText(f"{v}%"))
+        volume_row.addWidget(volume_icon)
+        volume_row.addWidget(slider, 1)
+        volume_row.addWidget(volume_value)
         slider_action = QWidgetAction(menu)
-        slider_action.setDefaultWidget(slider)
+        slider_action.setDefaultWidget(volume_box)
         menu.addAction(slider_action)
+        menu.addSeparator()
 
-        # Skin submenu
+        # Skin submenu (current skin checked)
         skin_menu = menu.addMenu(t("menu_change_skin"))
         for skin_name in self._skins:
-            action = QAction(skin_name.capitalize(), self)
+            action = QAction(skin_name.capitalize(), self, checkable=True)
+            action.setChecked(skin_name == self._current_skin)
             action.triggered.connect(lambda checked, s=skin_name: self.change_skin(s))
             skin_menu.addAction(action)
 
-        # Language submenu
+        # Language submenu (current language checked)
         lang_menu = menu.addMenu(t("menu_language"))
         for code, label in [("en", "English"), ("fr", "Français")]:
-            action = QAction(label, self)
+            action = QAction(label, self, checkable=True)
+            action.setChecked(code == get_current_language())
             action.triggered.connect(lambda checked, l=code: self._change_language(l))
             lang_menu.addAction(action)
 
+        handlers.update(self._build_options_menu(menu))
+        if PRESENCE_ENABLED:
+            handlers.update(self._build_presence_menu(menu))
         menu.addSeparator()
         credits_action = menu.addAction(t("menu_credits"))
         quit_action    = menu.addAction(t("menu_quit"))
@@ -797,37 +762,20 @@ class Prinny(QWidget):
         # --- Handle choice ---
         if chosen == info_action:
             self._show_info_window()
-        elif chosen == idle_action:
-            self._forced_state = "idle"
-        elif chosen == walk_action:
-            self._forced_state = "walk"
-        elif chosen == inspect_action:
-            self._forced_state = "inspect_menu"
-        elif chosen == hype_action:
-            self._forced_state = "hype"
-        elif chosen == punish_action:
-            self._forced_state = "fail"
-        elif chosen == reset_action:
-            self._forced_state = None
+        elif chosen in behavior_actions:
+            self._forced_state = behavior_actions[chosen]
         elif chosen == mute_action:
             self._muted = not self._muted
             self.config.set("muted", self._muted)
         elif chosen == media_action:
             self._media_enabled = media_action.isChecked()
             self.config.set("media_enabled", self._media_enabled)
-        elif chosen == ram_action:
-            self._ram_alert_enabled = ram_action.isChecked()
-            self.config.set("ram_alert_enabled", self._ram_alert_enabled)
-            if not self._ram_alert_enabled:
-                # On désactive : fermer la bulle immédiatement
-                self._close_alert_bubble()
-            else:
-                # On réactive : reset du flag pour que l alerte se déclenche à nouveau
-                self._ram_alert_triggered = False
+        elif chosen in handlers:
+            handlers[chosen]()
         elif chosen == credits_action:
             self._show_credits()
         elif chosen == quit_action:
-            QApplication.quit()
+            self.quit_app()
 
         self._menu_active = False
 
@@ -840,7 +788,7 @@ class Prinny(QWidget):
         """Open the system info window (lazy initialisation)."""
         from info_window import InfoWindow
         if not self._info_window:
-            self._info_window = InfoWindow()
+            self._info_window = InfoWindow(self.config)
         self._info_window.show()
         self._info_window.raise_()
 
@@ -859,6 +807,105 @@ class Prinny(QWidget):
         load_language(lang)
         self.config.set("language", lang)
 
+
+    # -----------------------------------------------------------------------
+    # Discord Rich Presence window
+    # -----------------------------------------------------------------------
+
+    def _build_presence_menu(self, menu) -> dict:
+        """
+        Add the Discord Rich Presence submenu to `menu`.
+
+        Lists the saved profiles for one-click switching, plus stop,
+        autostart and the manager window.
+
+        Returns:
+            Dict mapping each clickable QAction to the callable to run.
+        """
+        manager = self._presence_manager
+        handlers = {}
+
+        title = t("menu_discord")
+        if manager.is_active:
+            title += f"  🟢 {manager.profile_name}"
+        elif manager.is_waiting:
+            title += "  🟡"
+        sub = menu.addMenu(title)
+
+        profiles = load_profiles()
+        if not profiles:
+            sub.addAction(t("menu_discord_empty")).setEnabled(False)
+        for profile in profiles:
+            name   = profile.get("name") or "—"
+            action = QAction(name, self, checkable=True)
+            action.setChecked(manager.is_active and manager.profile_name == name)
+            sub.addAction(action)
+            handlers[action] = lambda p=profile: self._activate_presence(p)
+
+        preview_menu = sub.addMenu(t("menu_discord_preview"))
+        preview_menu.setEnabled(bool(profiles))
+        for profile in profiles:
+            action = preview_menu.addAction(profile.get("name") or "—")
+            handlers[action] = lambda p=profile: self._show_presence_preview(p)
+
+        sub.addSeparator()
+        stop_action = sub.addAction(t("menu_discord_stop"))
+        stop_action.setEnabled(manager.is_active or manager.is_waiting)
+        handlers[stop_action] = manager.stop
+
+        autostart_action = QAction(t("menu_discord_autostart"), self, checkable=True)
+        autostart_action.setChecked(self.config.get("presence_autostart"))
+        sub.addAction(autostart_action)
+        handlers[autostart_action] = lambda: self.config.set(
+            "presence_autostart", autostart_action.isChecked()
+        )
+
+        sub.addSeparator()
+        manage_action = sub.addAction(t("menu_discord_manage"))
+        handlers[manage_action] = self._show_presence_window
+
+        return handlers
+
+    def _activate_presence(self, profile: dict) -> None:
+        """Apply a saved presence profile (from the right-click menu)."""
+        self._presence_manager.activate_async(profile)
+
+    def _autostart_presence(self) -> None:
+        """Re-apply the last active presence profile at launch."""
+        name = self.config.get("presence_last_profile")
+        profile = find_profile(name) if name else None
+        if profile:
+            self._presence_manager.activate_async(profile)
+
+    def _on_presence_state(self, active: bool, message: str) -> None:
+        """React to presence changes: remember the profile and tell the user."""
+        manager = self._presence_manager
+        if active:
+            self.config.set("presence_last_profile", manager.profile_name)
+            self._show_bubble(t("presence_bubble_on").format(name=manager.profile_name))
+        elif message == "stopped":
+            self.config.set("presence_last_profile", "")
+        elif message in STATUS_TEXTS:
+            self._show_bubble(t(STATUS_TEXTS[message][0]))
+        else:
+            self._show_bubble(t("presence_error").format(error=message))
+
+    def _show_presence_preview(self, profile: dict) -> None:
+        """Show a popup with what Discord displays for `profile`."""
+        from presence_window import PreviewPopup
+        if not self._preview_popup:
+            self._preview_popup = PreviewPopup(self._presence_manager)
+        self._preview_popup.set_profile(profile)
+        self._preview_popup.show()
+        self._preview_popup.raise_()
+
+    def _show_presence_window(self) -> None:
+        """Open the Discord Rich Presence manager window."""
+        from presence_window import PresenceWindow
+        if not self._presence_window:
+            self._presence_window = PresenceWindow(self._presence_manager)
+        self._presence_window.show()
+        self._presence_window.raise_()
 
     # -----------------------------------------------------------------------
     # Credits

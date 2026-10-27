@@ -16,6 +16,16 @@ Stored settings:
 - media_enabled      : whether to display current media (bool)
 - ram_alert_enabled  : whether to show RAM alert notifications (bool)
 - ram_alert_threshold: RAM percentage threshold for alerts (int)
+- cpu/disk/temp/battery_alert_enabled and _threshold: same for the other
+  alerts (see alerts.py)
+- quotes_enabled      : random quote bubbles (bool)
+- quotes_frequency    : 'low', 'normal' or 'high' (str)
+- reactions_enabled   : contextual reactions, see reactions.py (bool)
+- dnd_fullscreen      : hide Prinny and stay silent during full-screen apps (bool)
+- info_window_pos     : last position of the system info window, "x,y" (str)
+- presence_autostart  : re-apply the last Discord presence at launch (bool)
+- presence_last_profile: name of the last active presence profile (str)
+- presence_preview_visible: show the preview panel in the presence window (bool)
 """
 
 from PyQt5.QtCore import QSettings
@@ -33,6 +43,22 @@ DEFAULTS = {
     "media_enabled":       True,
     "ram_alert_enabled":   True,
     "ram_alert_threshold": 80,
+    "cpu_alert_enabled":     False,
+    "cpu_alert_threshold":   90,
+    "disk_alert_enabled":    True,
+    "disk_alert_threshold":  90,
+    "temp_alert_enabled":    False,
+    "temp_alert_threshold":  85,
+    "battery_alert_enabled": True,
+    "battery_alert_threshold": 20,
+    "quotes_enabled":      True,
+    "quotes_frequency":    "normal",
+    "reactions_enabled":   True,
+    "dnd_fullscreen":      True,
+    "info_window_pos":     "",
+    "presence_autostart":  False,
+    "presence_last_profile": "",
+    "presence_preview_visible": True,
 }
 
 
