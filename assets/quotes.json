@@ -1,0 +1,144 @@
+{
+    "fr": {
+        "random": [
+            "Hé, tu travailles ou tu regardes des vidéos de chats, dood ?",
+            "Je suis un Prinny, dood ! Pas un pingouin... enfin, presque.",
+            "Si je tombe, c'est que quelqu'un m'a lancé, dood !",
+            "T'as pensé à boire de l'eau aujourd'hui, dood ?",
+            "Cette session dure depuis un moment... une petite pause, dood ?",
+            "On m'a promis une carrière de héros. On m'a surtout donné un bureau, dood.",
+            "Un Prinny survit à 1000 explosions. Je préfère ne pas tester, dood.",
+            "Tape moins fort sur ce clavier, il t'a rien fait, dood !",
+            "Quand j'aurai assez de mana, je prendrai ma retraite, dood.",
+            "Ctrl+S, dood ! Sauvegarde ton travail !",
+            "Tu sais que je peux voir ton écran ? Je dis ça, je dis rien, dood.",
+            "Les onglets ouverts, c'est comme les démons : il y en a toujours trop, dood.",
+            "Pense à t'étirer le dos, dood !",
+            "Je me balade, je surveille, je juge. C'est mon métier, dood.",
+            "Si tu me lances en l'air, je retombe sur mes pattes. Probablement, dood.",
+            "Tu fais du bon boulot aujourd'hui, dood ! Continue !",
+            "C'est l'heure d'un bon café... ou d'un thé, dood ?",
+            "Mes pieds me font mal à force de marcher sur ton bureau, dood.",
+            "Je compile des statistiques sur toi, dood. Pour rien. Promis.",
+            "Un Prinny de plus ou de moins, personne ne remarque... sauf toi, j'espère, dood."
+        ],
+        "greeting_morning": [
+            "Bonjour, dood ! Une belle journée pour ne rien casser !",
+            "Debout là-dedans, dood ! Le café n'attend pas !",
+            "Salut ! Prêt pour une nouvelle journée, dood ?"
+        ],
+        "greeting_day": [
+            "Re-salut, dood ! Ça avance ?",
+            "Bon après-midi, dood !",
+            "Me revoilà, dood ! Tu m'as manqué... un peu."
+        ],
+        "greeting_evening": [
+            "Bonsoir, dood ! La journée a été longue ?",
+            "Bonne soirée, dood ! Détends-toi un peu !",
+            "Coucou, dood ! On finit la journée en beauté ?"
+        ],
+        "greeting_night": [
+            "Déjà là à cette heure, dood ?",
+            "Une session nocturne ? Les Prinnies ne dorment jamais, dood !",
+            "Il est tard, dood... mais je te tiens compagnie."
+        ],
+        "late_night": [
+            "Il est tard, dood ! Va dormir, les écrans seront là demain.",
+            "Les yeux rouges, c'est pas ta couleur, dood.",
+            "Même les démons dorment à cette heure, dood !",
+            "Moi je dors jamais, mais toi si, dood ! Va te coucher !",
+            "Encore là ? Ton lit t'attend, dood."
+        ],
+        "battery_plugged": [
+            "Ahh, du courant, dood ! Merci !",
+            "Branché ! Je revis, dood !",
+            "Ça charge ! Plus de panique, dood !"
+        ],
+        "battery_unplugged": [
+            "Hé, on est sur batterie, dood !",
+            "Plus de câble ! Économise l'énergie, dood !",
+            "Débranché ! Je garde un œil sur la batterie, dood."
+        ],
+        "milestone_clicks": [
+            "{count} clics ! Ta souris doit être fatiguée, dood !",
+            "Déjà {count} clics, dood ! Quel acharnement !",
+            "{count} clics... Tu cliques comme un démon, dood !"
+        ],
+        "milestone_keys": [
+            "{count} frappes ! Ton clavier fume, dood !",
+            "Déjà {count} touches pressées, dood ! Quel écrivain !",
+            "{count} touches... Tu tapes plus vite qu'un Prinny en fuite, dood !"
+        ]
+    },
+    "en": {
+        "random": [
+            "Hey, are you working or watching cat videos, dood?",
+            "I'm a Prinny, dood! Not a penguin... well, almost.",
+            "If I fall, it's because someone threw me, dood!",
+            "Did you drink some water today, dood?",
+            "This session has been going on for a while... how about a break, dood?",
+            "They promised me a hero's career. I got a desktop instead, dood.",
+            "A Prinny can survive 1000 explosions. I'd rather not test it, dood.",
+            "Go easy on that keyboard, it did nothing to you, dood!",
+            "When I have enough mana, I'm retiring, dood.",
+            "Ctrl+S, dood! Save your work!",
+            "You know I can see your screen? Just saying, dood.",
+            "Open tabs are like demons: there are always too many, dood.",
+            "Remember to stretch your back, dood!",
+            "I wander, I watch, I judge. That's my job, dood.",
+            "If you throw me in the air, I land on my feet. Probably, dood.",
+            "You're doing great today, dood! Keep it up!",
+            "Time for a good coffee... or tea, dood?",
+            "My feet hurt from walking on your desktop all day, dood.",
+            "I'm compiling statistics about you, dood. For no reason. Promise.",
+            "One Prinny more or less, nobody notices... except you, I hope, dood."
+        ],
+        "greeting_morning": [
+            "Good morning, dood! A fine day to break nothing!",
+            "Rise and shine, dood! Coffee won't wait!",
+            "Hi there! Ready for a new day, dood?"
+        ],
+        "greeting_day": [
+            "Hello again, dood! How's it going?",
+            "Good afternoon, dood!",
+            "I'm back, dood! Did you miss me? A little?"
+        ],
+        "greeting_evening": [
+            "Good evening, dood! Was it a long day?",
+            "Have a nice evening, dood! Relax a bit!",
+            "Hey, dood! Let's finish the day in style!"
+        ],
+        "greeting_night": [
+            "Already here at this hour, dood?",
+            "A night session? Prinnies never sleep, dood!",
+            "It's late, dood... but I'll keep you company."
+        ],
+        "late_night": [
+            "It's late, dood! Go to sleep, screens will still be here tomorrow.",
+            "Red eyes aren't your color, dood.",
+            "Even demons sleep at this hour, dood!",
+            "I never sleep, but you do, dood! Go to bed!",
+            "Still here? Your bed is waiting, dood."
+        ],
+        "battery_plugged": [
+            "Ahh, power, dood! Thank you!",
+            "Plugged in! I feel alive, dood!",
+            "Charging! No more panic, dood!"
+        ],
+        "battery_unplugged": [
+            "Hey, we're on battery, dood!",
+            "No more cable! Save some energy, dood!",
+            "Unplugged! I'll keep an eye on the battery, dood."
+        ],
+        "milestone_clicks": [
+            "{count} clicks! Your mouse must be tired, dood!",
+            "Already {count} clicks, dood! What dedication!",
+            "{count} clicks... You click like a demon, dood!"
+        ],
+        "milestone_keys": [
+            "{count} keystrokes! Your keyboard is smoking, dood!",
+            "Already {count} keys pressed, dood! What a writer!",
+            "{count} keys... You type faster than a fleeing Prinny, dood!"
+        ]
+    }
+}

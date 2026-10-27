@@ -73,6 +73,19 @@ def get_cpu_temperature() -> str:
     return "N/A"
 
 
+def get_cpu_temperature_c() -> float | None:
+    """
+    Return the CPU temperature in °C as a number.
+
+    Returns:
+        Temperature, or None when it cannot be read.
+    """
+    try:
+        return float(get_cpu_temperature().replace("°C", ""))
+    except ValueError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # RAM
 # ---------------------------------------------------------------------------
@@ -86,12 +99,16 @@ def get_ram_usage() -> dict:
             - percent (float): usage percentage
             - used_gb (int): used RAM in GB
             - total_gb (int): total RAM in GB
+            - used (int): used RAM in bytes
+            - total (int): total RAM in bytes
     """
     ram = psutil.virtual_memory()
     return {
         "percent":  ram.percent,
         "used_gb":  ram.used  // (1024 ** 3),
         "total_gb": ram.total // (1024 ** 3),
+        "used":     ram.used,
+        "total":    ram.total,
     }
 
 
@@ -123,9 +140,75 @@ def get_disk_usage(path: str = "/") -> dict:
     }
 
 
+def get_fixed_drives() -> list:
+    """
+    Return usage for every local drive (CD-ROMs and network drives skipped).
+
+    Returns:
+        List of dicts with keys mount (str), used, free, total (bytes)
+        and percent (float).
+    """
+    drives = []
+    for part in psutil.disk_partitions(all=False):
+        if "cdrom" in part.opts or "remote" in part.opts or not part.fstype:
+            continue
+        try:
+            usage = psutil.disk_usage(part.mountpoint)
+        except OSError:
+            continue
+        drives.append({
+            "mount":   part.mountpoint.rstrip("\\"),
+            "used":    usage.used,
+            "free":    usage.free,
+            "total":   usage.total,
+            "percent": usage.percent,
+        })
+    return drives
+
+
+# ---------------------------------------------------------------------------
+# Uptime / battery
+# ---------------------------------------------------------------------------
+
+def get_uptime_seconds() -> int:
+    """Return the seconds elapsed since the system booted."""
+    return int(time.time() - psutil.boot_time())
+
+
+def get_battery() -> dict | None:
+    """
+    Return the battery state, or None on machines without a battery.
+
+    Returns:
+        Dict with keys percent (float) and plugged (bool).
+    """
+    battery = psutil.sensors_battery()
+    if battery is None:
+        return None
+    return {"percent": battery.percent, "plugged": bool(battery.power_plugged)}
+
+
 # ---------------------------------------------------------------------------
 # Network
 # ---------------------------------------------------------------------------
+
+def measure_latency() -> int:
+    """
+    Measure the TCP connection time to 8.8.8.8:53.
+
+    Blocks up to 2 seconds when offline: do not call it from the GUI thread.
+
+    Returns:
+        Latency in milliseconds, or -1 if unreachable.
+    """
+    try:
+        start = time.time()
+        with socket.create_connection(("8.8.8.8", 53), timeout=2):
+            pass
+        return int((time.time() - start) * 1000)
+    except Exception:
+        return -1
+
 
 class NetworkMonitor:
     """
@@ -178,45 +261,45 @@ class NetworkMonitor:
         else:
             return f"{total_bytes} B"
 
-    def get_stats(self) -> dict:
+    def get_speeds(self) -> dict:
         """
-        Return current network statistics.
+        Return current speeds and totals (fast, safe to call every second).
 
         Returns:
             Dict with keys:
-                - latency_ms (int): ping to 8.8.8.8 in milliseconds, or -1
-                - sent_total (str): total bytes sent since boot
-                - recv_total (str): total bytes received since boot
-                - sent_speed (str): current upload speed
-                - recv_speed (str): current download speed
+                - sent_bps / recv_bps (float): speeds in bytes per second
+                - sent_speed / recv_speed (str): the same, human readable
+                - sent_total / recv_total (str): totals since boot
         """
-        # Latency
-        latency_ms = -1
-        try:
-            start = time.time()
-            socket.create_connection(("8.8.8.8", 53), timeout=2)
-            latency_ms = int((time.time() - start) * 1000)
-        except Exception:
-            pass
+        now   = time.time()
+        net   = psutil.net_io_counters()
+        delta = max(now - self._last_time, 0.001)  # avoid division by zero
 
-        # Speed
-        now     = time.time()
-        net     = psutil.net_io_counters()
-        delta   = max(now - self._last_time, 0.001)  # avoid division by zero
-
-        sent_speed = (net.bytes_sent - self._last_net.bytes_sent) / delta
-        recv_speed = (net.bytes_recv - self._last_net.bytes_recv) / delta
+        sent_bps = (net.bytes_sent - self._last_net.bytes_sent) / delta
+        recv_bps = (net.bytes_recv - self._last_net.bytes_recv) / delta
 
         self._last_net  = net
         self._last_time = now
 
         return {
-            "latency_ms": latency_ms,
+            "sent_bps":   sent_bps,
+            "recv_bps":   recv_bps,
+            "sent_speed": self._human_speed(sent_bps),
+            "recv_speed": self._human_speed(recv_bps),
             "sent_total": self._human_total(net.bytes_sent),
             "recv_total": self._human_total(net.bytes_recv),
-            "sent_speed": self._human_speed(sent_speed),
-            "recv_speed": self._human_speed(recv_speed),
         }
+
+    def get_stats(self) -> dict:
+        """
+        Return speeds, totals and latency (blocks while measuring latency).
+
+        Returns:
+            Same keys as get_speeds(), plus latency_ms (int, -1 if unreachable).
+        """
+        stats = self.get_speeds()
+        stats["latency_ms"] = measure_latency()
+        return stats
 
 
 # ---------------------------------------------------------------------------
