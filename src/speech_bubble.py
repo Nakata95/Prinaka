@@ -28,9 +28,9 @@ class SpeechBubble(QWidget):
         parent: Optional parent widget.
     """
 
-    BUBBLE_COLOR  = QColor(255, 255, 255)
+    BUBBLE_COLOR  = QColor(235, 223, 174)
     BORDER_COLOR  = QColor(0, 0, 0)
-    TEXT_COLOR    = "blue"
+    TEXT_COLOR    = "black"
     FONT_SIZE     = 20
     PADDING       = 10
     ARROW_HEIGHT  = 15
