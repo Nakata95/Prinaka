@@ -41,7 +41,7 @@ assets/sprites/
 Si ton skin a une taille différente de 165x165, déclare-la dans `src/prinny.py` :
 
 ```python
-self.skin_sizes = {
+SKIN_SIZES = {
     "mon_skin": (200, 200),  # largeur, hauteur en pixels
 }
 ```
