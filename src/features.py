@@ -61,6 +61,8 @@ class FeaturesMixin:
 
     def _init_features(self) -> None:
         """Create the timers and helpers. Call once the widget is built."""
+        self._network_window = None   # created on first use (see toggle_network_window)
+        self._player_window  = None   # created on first use (see toggle_player_window)
         self._dnd_active  = False   # a full-screen app is running
         self._user_hidden = False   # hidden by the user from the tray
 
@@ -262,8 +264,37 @@ class FeaturesMixin:
         if tray:
             tray.refresh_icon()
 
-    def show_info_window(self) -> None:
-        self._show_info_window()
+    def is_network_window_visible(self) -> bool:
+        return bool(self._network_window) and self._network_window.isVisible()
+
+    def toggle_network_window(self) -> None:
+        """
+        Open the compact network overlay, or close it if it is already open.
+
+        It is opened without taking the focus so a running game keeps it.
+        """
+        if self.is_network_window_visible():
+            self._network_window.hide()
+            return
+
+        from network_window import NetworkWindow
+        if not self._network_window:
+            self._network_window = NetworkWindow(self.config)
+        self._network_window.open(near=self, activate=False)
+
+    def is_player_window_visible(self) -> bool:
+        return bool(self._player_window) and self._player_window.isVisible()
+
+    def toggle_player_window(self) -> None:
+        """Open the mini media player, or close it if it is already open."""
+        if self.is_player_window_visible():
+            self._player_window.hide()
+            return
+
+        from player_window import PlayerWindow
+        if not self._player_window:
+            self._player_window = PlayerWindow(self.config)
+        self._player_window.open(near=self, activate=False)
 
     def quit_app(self) -> None:
         QApplication.quit()

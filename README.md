@@ -6,13 +6,16 @@ An animated desktop buddy based on **Prinny** from the *Disgaea* series, built w
 
 - 🐧 Animated mascot that roams your desktop (multi-monitor support)
 - 🎨 Multiple skins available
+- 📏 Adjustable size (75% to 200%), remembered between sessions
 - 🔊 Drag sounds with adjustable volume
-- 🎵 Displays currently playing media (Spotify, YouTube, etc.)
+- 🎵 Follows Spotify (or any media app) and shows the current track in a bubble
+- ▶️ Mini player — cover, title, progress bar, previous / play-pause / next and seek, for Spotify
 - 🖥 System stats window (CPU, RAM, disk, network, temperature...)
 - 🗑 Real-time recycle bin size
 - 🖱 Click and keystroke counter
 - ⚠️ System alerts — persistent bubble for RAM, CPU, disk, temperature and battery, each with its own on/off switch and threshold
 - 💬 Speech bubbles in English / French: random quotes and contextual reactions (greetings, late night, click/keystroke milestones, battery plugged in/out), all optional
+- 📡 Compact network monitor (latency, upload, download) to keep on top of an online game or a call
 - 🎮 Do not disturb — Prinny hides and stays silent while a full-screen app (game, video) is running
 - 🧷 System tray icon to show/hide Prinny or quit
 - 🚀 Optional launch at Windows startup
@@ -36,7 +39,7 @@ python src/main.py
 - **Left click + drag** : move Prinny around
 - **Right click** : open the menu
   - Force an animation (idle, walk, inspect, hype, punish, free)
-  - Change skin
+  - Change skin and size
   - Adjust volume / mute
   - Toggle current media display
   - Choose a behavior, set up dialogues, system alerts and options (startup, do not disturb)
@@ -61,6 +64,16 @@ A single persistent bubble lists every active alert and disappears once they are
 ## Dialogues
 
 Right-click → **Dialogues**: turn random quotes and contextual reactions on or off, and choose how often Prinny talks (rare / normal / frequent). Quotes are in `assets/quotes.json`, by language and category: add your own lines there.
+
+## Mini player
+
+Right-click (or tray icon) → **Mini player**: cover art, title, artist, a progress bar (click or drag to seek) and previous / play-pause / next, shuffle and repeat buttons (click repeat to go off → all → this track → off). It controls Spotify through Windows' media controls, so it works with the desktop app and the Store version. By default Prinny only follows Spotify (right-click → **Spotify only**); untick it to follow any media app (browser, Windows Media Player...). The window never takes the keyboard focus.
+
+## Network monitor
+
+Right-click (or tray icon) → **Network monitor**: a small always-on-top window with your latency in ms and live upload / download speeds, no totals. It never takes the keyboard focus, so a running game keeps it. The 🔓 button makes it click-through; close it from the menu or the tray icon to unlock it. It works over windowed and borderless games; some games in exclusive full screen hide every overlay.
+
+The system info window and this one use the same button to open *and* close them, even if one was dragged out of sight, and reopen in the middle of the screen when their position is lost.
 
 ## Do not disturb
 
@@ -91,6 +104,12 @@ Prinaka/
 │   ├── quotes.py        # Localized quote picker
 │   ├── fullscreen.py    # Full-screen / presentation detection
 │   ├── tray.py          # System tray icon
+│   ├── menu_style.py    # Shared look of the context menus
+│   ├── player_window.py # Mini media player
+│   ├── network_window.py # Compact network overlay
+│   ├── floating.py      # Base of the overlay windows (drag, position, recovery)
+│   ├── stat_widgets.py  # Gauges and graphs shared by the info windows
+│   ├── poller.py        # Background thread reading slow stats
 │   ├── startup.py       # Launch at Windows startup
 │   ├── discord_presence.py # Discord Rich Presence (connection, reconnect, profiles)
 │   ├── presence_window.py  # Profile manager window + live preview

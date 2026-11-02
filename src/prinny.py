@@ -29,9 +29,10 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 
 from utils import resource_path, load_sprites, get_total_screen_rect, t, load_language, get_current_language
 from config import ConfigManager
-from media import get_current_media_info
+from media import get_current_media_info, SOURCE_SPOTIFY, SOURCE_ANY
 from speech_bubble import SpeechBubble
 from features import FeaturesMixin
+from menu_style import style_menu
 from discord_presence import (
     DiscordPresenceManager, STATUS_TEXTS, find_profile, load_profiles,
 )
@@ -50,6 +51,7 @@ MAX_FALL_SPEED  = 90
 FALL_SMOOTH     = 0.5
 JUMP_VELOCITY   = -50
 GROUND_OFFSET   = 40        # px above the bottom of the screen
+SIZE_PERCENTS   = (75, 100, 125, 150, 200)   # selectable sizes, % of the skin's base size
 
 # Discord Rich Presence is finished but hidden for now: set to True to bring
 # back the menu entry, the autostart and the background reconnection.
@@ -100,7 +102,11 @@ class Prinny(FeaturesMixin, QWidget):
         load_language(self.config.get("language"))
 
         # --- Skins ---
-        self._skins = {name: self._load_skin(f"assets/sprites/{name}") for name in self.SKIN_SIZES}
+        self._base_skins = {name: self._load_skin(f"assets/sprites/{name}") for name in self.SKIN_SIZES}
+        self._scale = self.config.get("size_percent")
+        if self._scale not in SIZE_PERCENTS:
+            self._scale = 100
+        self._skins = {name: self._scale_skin(frames) for name, frames in self._base_skins.items()}
         self._current_skin = self.config.get("skin")
         if self._current_skin not in self._skins:
             self._current_skin = "default"
@@ -168,6 +174,7 @@ class Prinny(FeaturesMixin, QWidget):
         # --- Media tracking ---
         self._media_enabled = self.config.get("media_enabled")
         self._last_media    = None
+        self._spotify_only  = self.config.get("media_spotify_only")
 
         self._media_timer = QTimer(self)
         self._media_timer.timeout.connect(self._check_media)
@@ -216,12 +223,60 @@ class Prinny(FeaturesMixin, QWidget):
             for anim in ANIMATIONS
         }
 
+    def _scale_skin(self, skin: dict) -> dict:
+        """Return a skin's frames resized to the current size setting."""
+        if self._scale == 100:
+            return skin
+        factor = self._scale / 100
+        return {
+            anim: [
+                p.scaled(round(p.width() * factor), round(p.height() * factor),
+                         Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                for p in frames
+            ]
+            for anim, frames in skin.items()
+        }
+
     def _apply_skin_size(self) -> None:
-        """Resize the widget to match the current skin's dimensions."""
+        """Resize the widget to match the current skin's dimensions and size setting."""
         w, h = self.SKIN_SIZES.get(self._current_skin, (165, 165))
+        w, h = round(w * self._scale / 100), round(h * self._scale / 100)
         self.resize(w, h)
         if hasattr(self, "_label"):
             self._label.resize(w, h)
+
+    def set_size(self, percent: int) -> None:
+        """
+        Resize Prinny, keeping his feet and horizontal center where they are.
+
+        Args:
+            percent: One of SIZE_PERCENTS.
+        """
+        if percent not in SIZE_PERCENTS or percent == self._scale:
+            return
+
+        center_x = self.x() + self.width() // 2
+        bottom   = self.y() + self.height()
+
+        self._scale = percent
+        self.config.set("size_percent", percent)
+        self._skins   = {name: self._scale_skin(frames) for name, frames in self._base_skins.items()}
+        self._sprites = self._skins[self._current_skin]
+        self._apply_skin_size()
+
+        area = get_total_screen_rect()
+        x = max(area.left(), min(center_x - self.width() // 2, area.right() - self.width()))
+        self.move(x, bottom - self.height())
+
+        frames = self._sprites.get(self._current_anim, [])
+        if frames:
+            self._label.setPixmap(frames[self._frame % len(frames)])
+        self._refresh_tray_icon()
+
+        for bubble in (self._bubble, self._alert_bubble):
+            if bubble and not sip.isdeleted(bubble):
+                bubble.set_scale(SpeechBubble._scale_from(self))
+                bubble.update_position(self)
 
     def change_skin(self, skin_name: str) -> None:
         """
@@ -616,7 +671,7 @@ class Prinny(FeaturesMixin, QWidget):
         if not self._media_enabled:
             return
 
-        current = get_current_media_info()
+        current = get_current_media_info(SOURCE_SPOTIFY if self._spotify_only else SOURCE_ANY)
         if current and current != self._last_media:
             self._last_media = current
             self._show_bubble(f"🎵 {current}", duration_ms=5000)
@@ -651,33 +706,17 @@ class Prinny(FeaturesMixin, QWidget):
         self._menu_active = True
 
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #1b1b1b;
-                border: 1px solid #444;
-                border-radius: 10px;
-                padding: 6px;
-            }
-            QMenu::item {
-                padding: 9px 30px;
-                color: #e0e0e0;
-                border-radius: 6px;
-            }
-            QMenu::item:selected {
-                background-color: #3a3a3a;
-            }
-            QMenu::item:disabled {
-                color: #777;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #333;
-                margin: 5px 10px;
-            }
-        """)
 
         # --- Actions ---
-        info_action = menu.addAction(t("menu_sys_info"))
+        info_action = menu.addAction(
+            t("menu_sys_info_close") if self.is_info_window_visible() else t("menu_sys_info")
+        )
+        net_action = menu.addAction(
+            t("menu_net_close") if self.is_network_window_visible() else t("menu_net")
+        )
+        player_action = menu.addAction(
+            t("menu_player_close") if self.is_player_window_visible() else t("menu_player")
+        )
         menu.addSeparator()
 
         # Behavior submenu (the forced state is checked)
@@ -705,15 +744,20 @@ class Prinny(FeaturesMixin, QWidget):
         media_action.setChecked(self._media_enabled)
         menu.addAction(media_action)
 
+        # Follow Spotify only, or every media app
+        spotify_action = QAction(t("menu_spotify_only"), self, checkable=True)
+        spotify_action.setChecked(self._spotify_only)
+        menu.addAction(spotify_action)
+
         # Mute toggle
         mute_label  = t("menu_mute") if not self._muted else t("menu_unmute")
         mute_action = menu.addAction(mute_label)
 
         # Volume row: icon, slider, live percentage
         volume_box = QWidget()
-        volume_box.setStyleSheet("background: transparent; color: #e0e0e0;")
+        volume_box.setStyleSheet("background: transparent; color: #cdd6f4; font-size: 13px;")
         volume_row = QHBoxLayout(volume_box)
-        volume_row.setContentsMargins(30, 4, 30, 4)
+        volume_row.setContentsMargins(14, 4, 14, 4)
         volume_icon  = QLabel("🔊")
         volume_value = QLabel(f"{self._volume}%")
         volume_value.setMinimumWidth(40)
@@ -738,6 +782,14 @@ class Prinny(FeaturesMixin, QWidget):
             action.triggered.connect(lambda checked, s=skin_name: self.change_skin(s))
             skin_menu.addAction(action)
 
+        # Size submenu (current size checked)
+        size_menu = menu.addMenu(t("menu_size"))
+        for percent in SIZE_PERCENTS:
+            action = QAction(f"{percent}%", self, checkable=True)
+            action.setChecked(percent == self._scale)
+            action.triggered.connect(lambda checked, p=percent: self.set_size(p))
+            size_menu.addAction(action)
+
         # Language submenu (current language checked)
         lang_menu = menu.addMenu(t("menu_language"))
         for code, label in [("en", "English"), ("fr", "Français")]:
@@ -754,6 +806,7 @@ class Prinny(FeaturesMixin, QWidget):
         quit_action    = menu.addAction(t("menu_quit"))
 
         # --- Show menu ---
+        style_menu(menu)
         chosen = menu.exec_(event.globalPos())
 
         self._dragging = False
@@ -761,7 +814,18 @@ class Prinny(FeaturesMixin, QWidget):
 
         # --- Handle choice ---
         if chosen == info_action:
-            self._show_info_window()
+            self.toggle_info_window()
+        elif chosen == net_action:
+            self.toggle_network_window()
+        elif chosen == player_action:
+            self.toggle_player_window()
+        elif chosen == spotify_action:
+            self._spotify_only = spotify_action.isChecked()
+            self.config.set("media_spotify_only", self._spotify_only)
+            self._last_media = None
+            if self.is_player_window_visible():   # reopen so it follows the new source
+                self._player_window.hide()
+                self._player_window.open(near=self, activate=False)
         elif chosen in behavior_actions:
             self._forced_state = behavior_actions[chosen]
         elif chosen == mute_action:
@@ -784,13 +848,24 @@ class Prinny(FeaturesMixin, QWidget):
     # Info window
     # -----------------------------------------------------------------------
 
-    def _show_info_window(self) -> None:
-        """Open the system info window (lazy initialisation)."""
+    def is_info_window_visible(self) -> bool:
+        return bool(self._info_window) and self._info_window.isVisible()
+
+    def toggle_info_window(self) -> None:
+        """
+        Open the system info window, or close it if it is already open.
+
+        Closing works even when the window was dragged out of sight; opening
+        it again brings it back to the middle of Prinny's screen if needed.
+        """
+        if self.is_info_window_visible():
+            self._info_window.hide()
+            return
+
         from info_window import InfoWindow
         if not self._info_window:
             self._info_window = InfoWindow(self.config)
-        self._info_window.show()
-        self._info_window.raise_()
+        self._info_window.open(near=self)
 
 
     # -----------------------------------------------------------------------

@@ -50,21 +50,46 @@ class SpeechBubble(QWidget):
         # --- Label ---
         self.label = QLabel(text, self)
         self.label.setWordWrap(True)
+
+        self.set_scale(self._scale_from(parent))
+
+    # --- Scaling ---
+
+    @staticmethod
+    def _scale_from(prinny_widget) -> float:
+        """
+        Bubble scale for a Prinny size setting.
+
+        Follows the square root of his size, so the text stays readable when
+        he is small and does not become huge when he is big.
+        """
+        percent = getattr(prinny_widget, "_scale", 100)
+        return (percent / 100) ** 0.5
+
+    def set_scale(self, scale: float) -> None:
+        """Resize font, padding, arrow and border for a scale (1.0 = base size)."""
+        self._padding = round(self.PADDING * scale)
+        self._arrow   = round(self.ARROW_HEIGHT * scale)
+        self._radius  = round(self.BORDER_RADIUS * scale)
+        self._border  = max(1, round(self.BORDER_WIDTH * scale))
         self.label.setStyleSheet(f"""
             QLabel {{
                 color: {self.TEXT_COLOR};
-                font-size: {self.FONT_SIZE}px;
+                font-size: {round(self.FONT_SIZE * scale)}px;
                 background: transparent;
-                padding: {self.PADDING}px;
+                padding: {self._padding}px;
             }}
         """)
-        self.label.adjustSize()
+        self._relayout()
 
-        # --- Widget size ---
-        w = self.label.width()  + self.PADDING * 2
-        h = self.label.height() + self.PADDING * 2
-        self.resize(w, h + self.ARROW_HEIGHT)
-        self.label.move(self.PADDING, self.PADDING)
+    def _relayout(self) -> None:
+        """Fit the widget around the label."""
+        self.label.adjustSize()
+        w = self.label.width()  + self._padding * 2
+        h = self.label.height() + self._padding * 2
+        self.resize(w, h + self._arrow)
+        self.label.move(self._padding, self._padding)
+        self.update()
 
     # --- Drawing ---
 
@@ -76,20 +101,21 @@ class SpeechBubble(QWidget):
         path = QPainterPath()
 
         # Rounded rectangle (bubble body)
-        body_rect = QRectF(0, 0, self.width(), self.height() - self.ARROW_HEIGHT)
-        path.addRoundedRect(body_rect, self.BORDER_RADIUS, self.BORDER_RADIUS)
+        body_rect = QRectF(0, 0, self.width(), self.height() - self._arrow)
+        path.addRoundedRect(body_rect, self._radius, self._radius)
 
         # Downward arrow
         cx = self.width() // 2
+        half = round(10 * self._arrow / self.ARROW_HEIGHT)
         arrow = QPolygonF([
-            QPoint(cx - 10, self.height() - self.ARROW_HEIGHT),
-            QPoint(cx + 10, self.height() - self.ARROW_HEIGHT),
+            QPoint(cx - half, self.height() - self._arrow),
+            QPoint(cx + half, self.height() - self._arrow),
             QPoint(cx,      self.height() - 2),
         ])
         path.addPolygon(arrow)
 
         painter.setBrush(self.BUBBLE_COLOR)
-        painter.setPen(QPen(self.BORDER_COLOR, self.BORDER_WIDTH))
+        painter.setPen(QPen(self.BORDER_COLOR, self._border))
         painter.drawPath(path)
 
     # --- Positioning ---
@@ -129,10 +155,4 @@ class SpeechBubble(QWidget):
             text: New text to display.
         """
         self.label.setText(text)
-        self.label.adjustSize()
-
-        w = self.label.width()  + self.PADDING * 2
-        h = self.label.height() + self.PADDING * 2
-        self.resize(w, h + self.ARROW_HEIGHT)
-        self.label.move(self.PADDING, self.PADDING)
-        self.update()
+        self._relayout()

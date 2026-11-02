@@ -12,6 +12,7 @@ import os
 from PyQt5.QtWidgets import QSystemTrayIcon, QMenu
 from PyQt5.QtGui import QIcon, QPixmap
 
+from menu_style import style_menu
 from utils import t, resource_path
 
 
@@ -27,7 +28,8 @@ class TrayIcon(QSystemTrayIcon):
 
     Args:
         owner: The Prinny widget (needs toggle_visibility, is_user_hidden,
-            current_icon, show_info_window and quit_app).
+            current_icon, is_info_window_visible, toggle_info_window,
+            is_network_window_visible, toggle_network_window and quit_app).
     """
 
     def __init__(self, owner):
@@ -38,6 +40,7 @@ class TrayIcon(QSystemTrayIcon):
         self.activated.connect(self._on_activated)
 
         self._menu = QMenu()
+        style_menu(self._menu)
         self._menu.aboutToShow.connect(self._rebuild_menu)
         self.setContextMenu(self._menu)
 
@@ -62,7 +65,12 @@ class TrayIcon(QSystemTrayIcon):
 
         toggle_key = "tray_show" if self._owner.is_user_hidden() else "tray_hide"
         self._menu.addAction(t(toggle_key), self._owner.toggle_visibility)
-        self._menu.addAction(t("menu_sys_info"), self._owner.show_info_window)
+        info_key = "menu_sys_info_close" if self._owner.is_info_window_visible() else "menu_sys_info"
+        self._menu.addAction(t(info_key), self._owner.toggle_info_window)
+        net_key = "menu_net_close" if self._owner.is_network_window_visible() else "menu_net"
+        self._menu.addAction(t(net_key), self._owner.toggle_network_window)
+        player_key = "menu_player_close" if self._owner.is_player_window_visible() else "menu_player"
+        self._menu.addAction(t(player_key), self._owner.toggle_player_window)
         self._menu.addSeparator()
         self._menu.addAction(t("menu_quit"), self._owner.quit_app)
 

@@ -10,10 +10,13 @@ Registry path: HKEY_CURRENT_USER/Software/NakaCorp/Prinaka
 
 Stored settings:
 - skin               : active skin name (str)
+- size_percent       : Prinny's size, 75 to 200 (int)
 - volume             : sound volume 0-100 (int)
 - muted              : mute state (bool)
 - language           : active language code (str)
 - media_enabled      : whether to display current media (bool)
+- media_spotify_only : follow only Spotify, not every media app (bool)
+- player_window_pos  : last position of the mini player, "x,y" (str)
 - ram_alert_enabled  : whether to show RAM alert notifications (bool)
 - ram_alert_threshold: RAM percentage threshold for alerts (int)
 - cpu/disk/temp/battery_alert_enabled and _threshold: same for the other
@@ -23,6 +26,7 @@ Stored settings:
 - reactions_enabled   : contextual reactions, see reactions.py (bool)
 - dnd_fullscreen      : hide Prinny and stay silent during full-screen apps (bool)
 - info_window_pos     : last position of the system info window, "x,y" (str)
+- net_window_pos      : last position of the network overlay, "x,y" (str)
 - presence_autostart  : re-apply the last Discord presence at launch (bool)
 - presence_last_profile: name of the last active presence profile (str)
 - presence_preview_visible: show the preview panel in the presence window (bool)
@@ -37,10 +41,13 @@ from PyQt5.QtCore import QSettings
 
 DEFAULTS = {
     "skin":                "default",
+    "size_percent":        100,
     "volume":              50,
     "muted":               False,
     "language":            "en",
     "media_enabled":       True,
+    "media_spotify_only":  True,
+    "player_window_pos":   "",
     "ram_alert_enabled":   True,
     "ram_alert_threshold": 80,
     "cpu_alert_enabled":     False,
@@ -56,6 +63,7 @@ DEFAULTS = {
     "reactions_enabled":   True,
     "dnd_fullscreen":      True,
     "info_window_pos":     "",
+    "net_window_pos":      "",
     "presence_autostart":  False,
     "presence_last_profile": "",
     "presence_preview_visible": True,

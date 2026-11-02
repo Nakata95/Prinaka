@@ -6,13 +6,16 @@ Une mascotte de bureau animée basée sur **Prinny** de la série *Disgaea*, dé
 
 - 🐧 Mascotte animée qui se balade sur ton bureau (support multi-écrans)
 - 🎨 Plusieurs skins disponibles
+- 📏 Taille réglable (75 % à 200 %), mémorisée entre les sessions
 - 🔊 Sons au drag, volume réglable
-- 🎵 Affichage de la musique en cours de lecture (Spotify, YouTube, etc.)
+- 🎵 Suit Spotify (ou n'importe quelle appli média) et affiche le titre en cours dans une bulle
+- ▶️ Mini lecteur — pochette, titre, barre de progression, précédent / lecture-pause / suivant et déplacement dans le morceau, pour Spotify
 - 🖥 Fenêtre de stats système (CPU, RAM, disque, réseau, température...)
 - 🗑 Taille de la corbeille en temps réel
 - 🖱 Compteur de clics et frappes clavier
 - ⚠️ Alertes système — bulle persistante pour la RAM, le CPU, le disque, la température et la batterie, chacune avec son interrupteur et son seuil
 - 💬 Bulles de dialogue en français / anglais : citations aléatoires et réactions contextuelles (salutations, nuit tardive, paliers de clics/frappes, batterie branchée/débranchée), le tout désactivable
+- 📡 Moniteur réseau compact (latence, envoi, réception) à garder au-dessus d'un jeu en ligne ou d'un appel
 - 🎮 Ne pas déranger — Prinny se cache et reste silencieux pendant une appli en plein écran (jeu, vidéo)
 - 🧷 Icône dans la barre système pour afficher/masquer Prinny ou quitter
 - 🚀 Lancement optionnel au démarrage de Windows
@@ -36,7 +39,7 @@ python src/main.py
 - **Clic gauche + glisser** : déplacer Prinny
 - **Clic droit** : ouvrir le menu
   - Forcer une animation (immobile, marche, inspecte, hype, punition, libre)
-  - Changer de skin
+  - Changer de skin et de taille
   - Régler le volume / muet
   - Activer/désactiver l'affichage du média en cours
   - Choisir un comportement, régler les dialogues, les alertes système et les options (démarrage, ne pas déranger)
@@ -61,6 +64,16 @@ Une seule bulle persistante liste toutes les alertes actives et disparaît quand
 ## Dialogues
 
 Clic droit → **Dialogues** : active ou désactive les citations aléatoires et les réactions contextuelles, et règle la fréquence (rare / normale / fréquente). Les citations sont dans `assets/quotes.json`, par langue et par catégorie : tu peux y ajouter tes propres phrases.
+
+## Mini lecteur
+
+Clic droit (ou icône de la barre système) → **Mini lecteur** : pochette, titre, artiste, barre de progression (clic ou glisser pour se déplacer dans le morceau) et boutons précédent / lecture-pause / suivant, aléatoire et répétition (un clic sur répétition passe de désactivée → tout → ce morceau → désactivée). Il pilote Spotify via les commandes média de Windows, donc il marche avec l'appli de bureau comme avec la version Store. Par défaut Prinny ne suit que Spotify (clic droit → **Spotify uniquement**) ; décoche pour suivre n'importe quelle appli média (navigateur, Lecteur Windows Media...). La fenêtre ne prend jamais le focus clavier.
+
+## Moniteur réseau
+
+Clic droit (ou icône de la barre système) → **Moniteur réseau** : une petite fenêtre toujours au premier plan avec ta latence en ms et les débits d'envoi / réception en direct, sans les totaux. Elle ne prend jamais le focus clavier, donc un jeu en cours le garde. Le bouton 🔓 la rend « traversante » pour les clics ; ferme-la depuis le menu ou l'icône de la barre système pour la déverrouiller. Elle fonctionne au-dessus des jeux en fenêtré ou sans bordure ; certains jeux en plein écran exclusif masquent toutes les superpositions.
+
+La fenêtre Infos système et celle-ci s'ouvrent et se ferment avec le même bouton, même si l'une a été tirée hors de vue, et se rouvrent au milieu de l'écran quand leur position est perdue.
 
 ## Ne pas déranger
 
@@ -91,6 +104,12 @@ Prinaka/
 │   ├── quotes.py        # Sélection des citations par langue
 │   ├── fullscreen.py    # Détection plein écran / présentation
 │   ├── tray.py          # Icône de la barre système
+│   ├── menu_style.py    # Style commun des menus contextuels
+│   ├── player_window.py # Mini lecteur média
+│   ├── network_window.py # Superposition réseau compacte
+│   ├── floating.py      # Base des fenêtres flottantes (déplacement, position, récupération)
+│   ├── stat_widgets.py  # Jauges et graphiques partagés par les fenêtres d'infos
+│   ├── poller.py        # Thread de lecture des mesures lentes
 │   ├── startup.py       # Lancement au démarrage de Windows
 │   ├── discord_presence.py # Rich Presence Discord (connexion, reconnexion, profils)
 │   ├── presence_window.py  # Fenêtre de gestion des profils + aperçu

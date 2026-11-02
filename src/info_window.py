@@ -15,16 +15,11 @@ temperature, drives, recycle bin) are read in a background thread so the
 window never freezes, and nothing runs while the window is hidden.
 """
 
-import time
-import threading
-from collections import deque
-
 import psutil
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QPushButton
+    QApplication, QFrame, QVBoxLayout, QHBoxLayout, QPushButton
 )
-from PyQt5.QtCore import Qt, QTimer, QPoint, QPointF, QRectF, QObject, pyqtSignal
-from PyQt5.QtGui import QPainter, QPainterPath, QColor, QPen
+from PyQt5.QtCore import Qt, QTimer
 
 from system_stats import (
     get_cpu_usage,
@@ -39,22 +34,21 @@ from system_stats import (
 )
 from listeners import get_click_count, get_key_count
 from quotes import format_number
-from utils import t, get_total_screen_rect
+from utils import t
+from floating import FloatingWindow, GRAB_WIDTH, GRAB_HEIGHT   # noqa: F401 (re-exported)
+from poller import BackgroundPoller
+from stat_widgets import (
+    GREEN, YELLOW, RED, BLUE, TEAL, MUTED,
+    level_color, latency_color, format_bytes, make_label,
+    MetricCard, SpeedRow,
+)
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-GREEN  = "#a6e3a1"
-YELLOW = "#f9e2af"
-RED    = "#f38ba8"
-BLUE   = "#89b4fa"
-TEAL   = "#94e2d5"
-MUTED  = "#6c7086"
-
 WINDOW_WIDTH       = 340
-HISTORY_LENGTH     = 60      # seconds of graph history
 SLOW_INTERVAL_S    = 5       # latency / temperature / drives
 RECYCLE_EVERY      = 6       # slow cycles between two recycle bin scans (30 s)
 
@@ -66,23 +60,6 @@ TEMP_WARN, TEMP_CRIT = 70.0, 85.0
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def level_color(fraction: float, warn: float = 0.6, crit: float = 0.85) -> str:
-    """Return green / yellow / red depending on how full a gauge is."""
-    if fraction >= crit:
-        return RED
-    if fraction >= warn:
-        return YELLOW
-    return GREEN
-
-
-def format_bytes(n: float) -> str:
-    """Format a byte count (e.g. '64 GB', '1.8 TB')."""
-    gb = n / (1024 ** 3)
-    if gb >= 1000:
-        return f"{gb / 1024:.1f} TB"
-    return f"{gb:.0f} GB" if gb >= 10 else f"{gb:.1f} GB"
-
 
 def format_uptime(seconds: int) -> str:
     """Format a duration as '3 d 4 h' or '12 min' using the active language."""
@@ -96,237 +73,11 @@ def format_uptime(seconds: int) -> str:
     return f"{minutes} {t('info_unit_min')}"
 
 
-def _label(style: str = "") -> QLabel:
-    lbl = QLabel()
-    lbl.setStyleSheet(f"background: transparent; {style}")
-    return lbl
-
-
-# ---------------------------------------------------------------------------
-# Drawing widgets
-# ---------------------------------------------------------------------------
-
-class UsageBar(QWidget):
-    """Thin rounded gauge."""
-
-    def __init__(self):
-        super().__init__()
-        self.setFixedHeight(6)
-        self._fraction = 0.0
-        self._color    = QColor(MUTED)
-
-    def set_value(self, fraction: float | None, color: str) -> None:
-        self._fraction = 0.0 if fraction is None else max(0.0, min(1.0, fraction))
-        self._color    = QColor(color if fraction is not None else MUTED)
-        self.update()
-
-    def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        rect   = QRectF(self.rect())
-        radius = rect.height() / 2
-
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 28))
-        painter.drawRoundedRect(rect, radius, radius)
-
-        if self._fraction > 0:
-            fill = QRectF(rect)
-            fill.setWidth(max(rect.height(), rect.width() * self._fraction))
-            painter.setBrush(self._color)
-            painter.drawRoundedRect(fill, radius, radius)
-
-
-class Sparkline(QWidget):
-    """Small history graph, newest value on the right."""
-
-    def __init__(self, color: str, height: int = 28, fixed_max: float | None = None):
-        super().__init__()
-        self.setFixedHeight(height)
-        self._values    = deque(maxlen=HISTORY_LENGTH)
-        self._color     = QColor(color)
-        self._fixed_max = fixed_max
-
-    def push(self, value: float) -> None:
-        self._values.append(float(value))
-        self.update()
-
-    def clear(self) -> None:
-        self._values.clear()
-        self.update()
-
-    def paintEvent(self, event) -> None:
-        count = len(self._values)
-        if count < 2:
-            return
-
-        width, height = self.width(), self.height()
-        top  = self._fixed_max or max(max(self._values), 1.0)
-        step = width / (HISTORY_LENGTH - 1)
-        points = [
-            QPointF(width - (count - 1 - i) * step, height - 1 - (v / top) * (height - 2))
-            for i, v in enumerate(self._values)
-        ]
-
-        line = QPainterPath(points[0])
-        for point in points[1:]:
-            line.lineTo(point)
-
-        area = QPainterPath(line)
-        area.lineTo(points[-1].x(), height)
-        area.lineTo(points[0].x(), height)
-        area.closeSubpath()
-
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        fill = QColor(self._color)
-        fill.setAlpha(55)
-        painter.fillPath(area, fill)
-        painter.setPen(QPen(self._color, 1.5))
-        painter.drawPath(line)
-
-
-class MetricCard(QWidget):
-    """Title + value, gauge, optional detail line and optional history graph."""
-
-    def __init__(self, spark_color: str | None = None, spark_max: float | None = None):
-        super().__init__()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
-
-        head = QHBoxLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        self._title = _label("color: #cdd6f4; font-size: 12px;")
-        self._value = _label("color: white; font-size: 13px; font-weight: bold;")
-        head.addWidget(self._title)
-        head.addStretch()
-        head.addWidget(self._value)
-        layout.addLayout(head)
-
-        self._bar = UsageBar()
-        layout.addWidget(self._bar)
-
-        self._detail = _label(f"color: {MUTED}; font-size: 11px;")
-        layout.addWidget(self._detail)
-
-        self._spark = Sparkline(spark_color, fixed_max=spark_max) if spark_color else None
-        if self._spark:
-            layout.addWidget(self._spark)
-
-    def set_title(self, text: str) -> None:
-        self._title.setText(text)
-
-    def update_metric(self, fraction: float | None, value: str, detail: str = "",
-                      warn: float = 0.6, crit: float = 0.85,
-                      spark_value: float | None = None) -> None:
-        self._value.setText(value)
-        self._bar.set_value(fraction, level_color(fraction or 0, warn, crit))
-        self._detail.setText(detail)
-        self._detail.setVisible(bool(detail))
-        if self._spark is not None and spark_value is not None:
-            self._spark.push(spark_value)
-
-    def clear_history(self) -> None:
-        if self._spark is not None:
-            self._spark.clear()
-
-
-class SpeedRow(QWidget):
-    """Arrow + current speed + history graph (upload or download)."""
-
-    def __init__(self, arrow: str, color: str):
-        super().__init__()
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
-        icon = _label("font-size: 12px;")
-        icon.setText(arrow)
-        icon.setFixedWidth(18)
-        layout.addWidget(icon)
-
-        self._speed = _label("color: white; font-size: 12px;")
-        self._speed.setFixedWidth(88)
-        layout.addWidget(self._speed)
-
-        self._spark = Sparkline(color, height=22)
-        layout.addWidget(self._spark, 1)
-
-    def update_speed(self, text: str, bps: float) -> None:
-        self._speed.setText(text)
-        self._spark.push(bps)
-
-    def clear_history(self) -> None:
-        self._spark.clear()
-
-
-# ---------------------------------------------------------------------------
-# Background reader
-# ---------------------------------------------------------------------------
-
-class SlowStatsWorker(QObject):
-    """
-    Reads the slow stats in a background thread.
-
-    Emits `updated(dict)` every few seconds with the keys latency (int ms,
-    -1 if offline), temp (float °C or None), drives (list), battery
-    (dict or None) and, every 30 seconds, recycle (str).
-    """
-
-    updated = pyqtSignal(dict)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._generation = 0
-
-    def start(self) -> None:
-        self._generation += 1
-        threading.Thread(target=self._run, args=(self._generation,), daemon=True).start()
-
-    def stop(self) -> None:
-        self._generation += 1   # makes the running thread exit
-
-    def _run(self, generation: int) -> None:
-        try:
-            import pythoncom   # WMI (temperature) needs COM initialised in every thread
-            pythoncom.CoInitialize()
-        except ImportError:
-            pythoncom = None
-
-        try:
-            self._loop(generation)
-        finally:
-            if pythoncom:
-                pythoncom.CoUninitialize()
-
-    def _loop(self, generation: int) -> None:
-        cycle = 0
-        while generation == self._generation:
-            data = {
-                "latency": measure_latency(),
-                "temp":    get_cpu_temperature_c(),
-                "drives":  get_fixed_drives(),
-                "battery": get_battery(),
-            }
-            if cycle % RECYCLE_EVERY == 0:
-                data["recycle"] = get_recycle_bin_stats()
-            if generation != self._generation:
-                return
-            self.updated.emit(data)
-            cycle += 1
-
-            for _ in range(SLOW_INTERVAL_S * 10):   # interruptible sleep
-                if generation != self._generation:
-                    return
-                time.sleep(0.1)
-
-
 # ---------------------------------------------------------------------------
 # Info Window
 # ---------------------------------------------------------------------------
 
-class InfoWindow(QWidget):
+class InfoWindow(FloatingWindow):
     """
     Frameless, translucent system dashboard.
 
@@ -353,12 +104,10 @@ class InfoWindow(QWidget):
     REFRESH_INTERVAL_MS = 1000
 
     def __init__(self, config=None):
-        super().__init__(None)
-        self._config = config
-
-        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_DeleteOnClose, False)
+        super().__init__(
+            config, "info_window_pos",
+            Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint,
+        )
         self.setFixedWidth(WINDOW_WIDTH)
 
         self._network     = NetworkMonitor()
@@ -372,11 +121,9 @@ class InfoWindow(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
 
-        self._worker = SlowStatsWorker(self)
+        self._worker = BackgroundPoller(self._read_slow, SLOW_INTERVAL_S, self)
         self._worker.updated.connect(self._on_slow_stats)
 
-        self._dragging       = False
-        self._drag_start_pos = QPoint()
         self._restore_position()
 
     # -----------------------------------------------------------------------
@@ -398,7 +145,7 @@ class InfoWindow(QWidget):
 
         # Header: title, copy, close
         header = QHBoxLayout()
-        self._title = _label("color: white; font-size: 13px; font-weight: bold;")
+        self._title = make_label("color: white; font-size: 13px; font-weight: bold;")
         header.addWidget(self._title)
         header.addStretch()
 
@@ -429,8 +176,8 @@ class InfoWindow(QWidget):
 
         # Network
         net_head = QHBoxLayout()
-        self._net_title   = _label("color: #cdd6f4; font-size: 12px;")
-        self._net_latency = _label(f"color: {MUTED}; font-size: 12px; font-weight: bold;")
+        self._net_title   = make_label("color: #cdd6f4; font-size: 12px;")
+        self._net_latency = make_label(f"color: {MUTED}; font-size: 12px; font-weight: bold;")
         net_head.addWidget(self._net_title)
         net_head.addStretch()
         net_head.addWidget(self._net_latency)
@@ -441,7 +188,7 @@ class InfoWindow(QWidget):
         body.addWidget(self._up)
         body.addWidget(self._down)
 
-        self._net_totals = _label(f"color: {MUTED}; font-size: 11px;")
+        self._net_totals = make_label(f"color: {MUTED}; font-size: 11px;")
         body.addWidget(self._net_totals)
 
         # Footer
@@ -450,8 +197,8 @@ class InfoWindow(QWidget):
         sep.setStyleSheet("background: rgba(255, 255, 255, 25);")
         body.addWidget(sep)
 
-        self._footer_a = _label("color: #cdd6f4; font-size: 12px;")
-        self._footer_b = _label("color: #cdd6f4; font-size: 12px;")
+        self._footer_a = make_label("color: #cdd6f4; font-size: 12px;")
+        self._footer_b = make_label("color: #cdd6f4; font-size: 12px;")
         body.addWidget(self._footer_a)
         body.addWidget(self._footer_b)
 
@@ -530,8 +277,20 @@ class InfoWindow(QWidget):
 
         self._report = self._build_report(cpu, ram, speed, clicks, keys, recycle, uptime)
 
+    def _read_slow(self, cycle: int) -> dict:
+        """Slow readings, run in the background thread (see BackgroundPoller)."""
+        data = {
+            "latency": measure_latency(),
+            "temp":    get_cpu_temperature_c(),
+            "drives":  get_fixed_drives(),
+            "battery": get_battery(),
+        }
+        if cycle % RECYCLE_EVERY == 0:
+            data["recycle"] = get_recycle_bin_stats()
+        return data
+
     def _on_slow_stats(self, data: dict) -> None:
-        """Slot for SlowStatsWorker.updated (runs on the GUI thread)."""
+        """Slot for BackgroundPoller.updated (runs on the GUI thread)."""
         self._slow.update(data)
 
         # Temperature
@@ -553,7 +312,7 @@ class InfoWindow(QWidget):
             color = MUTED
         else:
             self._net_latency.setText(f"📡 {latency} ms")
-            color = GREEN if latency < 60 else YELLOW if latency < 150 else RED
+            color = latency_color(latency)
         self._net_latency.setStyleSheet(
             f"background: transparent; color: {color}; font-size: 12px; font-weight: bold;"
         )
@@ -574,7 +333,7 @@ class InfoWindow(QWidget):
                 card.set_title(t("info_drive").format(mount=mount))
                 self._drives_box.addWidget(card)
                 self._drive_cards[mount] = card
-            QTimer.singleShot(0, self.adjustSize)
+            QTimer.singleShot(0, self._resize_and_recenter)
 
         for drive in drives:
             self._drive_cards[drive["mount"]].update_metric(
@@ -583,6 +342,12 @@ class InfoWindow(QWidget):
                                          total=format_bytes(drive["total"])),
                 warn=0.8, crit=0.9,
             )
+
+    def _resize_and_recenter(self) -> None:
+        """Fit the new content; keep the window centered if it was placed by center_on."""
+        self.adjustSize()
+        if self._center_rect is not None:
+            self._center()
 
     # -----------------------------------------------------------------------
     # Report
@@ -617,40 +382,3 @@ class InfoWindow(QWidget):
         QApplication.clipboard().setText(self._report)
         self._copy_btn.setText("✔")
         QTimer.singleShot(1200, lambda: self._copy_btn.setText("📋"))
-
-    # -----------------------------------------------------------------------
-    # Position
-    # -----------------------------------------------------------------------
-
-    def _restore_position(self) -> None:
-        """Move the window to its last position if it is still on screen."""
-        if not self._config:
-            return
-        try:
-            x, y = (int(v) for v in self._config.get("info_window_pos").split(","))
-        except ValueError:
-            return
-        if get_total_screen_rect().contains(QPoint(x + 20, y + 20)):
-            self.move(x, y)
-
-    def _save_position(self) -> None:
-        if self._config:
-            self._config.set("info_window_pos", f"{self.x()},{self.y()}")
-
-    # -----------------------------------------------------------------------
-    # Drag
-    # -----------------------------------------------------------------------
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton:
-            self._dragging       = True
-            self._drag_start_pos = event.globalPos() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, event) -> None:
-        if self._dragging:
-            self.move(event.globalPos() - self._drag_start_pos)
-
-    def mouseReleaseEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton:
-            self._dragging = False
-            self._save_position()
