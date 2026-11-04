@@ -17,6 +17,7 @@ Une mascotte de bureau animée basée sur **Prinny** de la série *Disgaea*, dé
 - 💬 Bulles de dialogue en français / anglais : citations aléatoires et réactions contextuelles (salutations, nuit tardive, paliers de clics/frappes, batterie branchée/débranchée), le tout désactivable
 - 📡 Moniteur réseau compact (latence, envoi, réception) à garder au-dessus d'un jeu en ligne ou d'un appel
 - 🎮 Ne pas déranger — Prinny se cache et reste silencieux pendant une appli en plein écran (jeu, vidéo)
+- 🛡 Relais Windows Defender — alerte quand Defender trouve une menace, et une entrée « Analyser un fichier » (rien ne quitte ton PC)
 - 🧷 Icône dans la barre système pour afficher/masquer Prinny ou quitter
 - 🚀 Lancement optionnel au démarrage de Windows
 - 🎮 Discord Rich Presence — profils personnalisés avec aperçu en direct, changement en un clic depuis le menu clic droit, reconnexion automatique
@@ -75,6 +76,16 @@ Clic droit (ou icône de la barre système) → **Moniteur réseau** : une petit
 
 La fenêtre Infos système et celle-ci s'ouvrent et se ferment avec le même bouton, même si l'une a été tirée hors de vue, et se rouvrent au milieu de l'écran quand leur position est perdue.
 
+## Sécurité (Windows Defender)
+
+Clic droit → **Sécurité**. Prinny ne détecte pas les virus lui-même : il lit ce que Microsoft Defender signale, en local, et le relaie.
+
+- **Surveiller Windows Defender** (activé par défaut) : chaque minute, Prinny regarde les détections de Defender. Une menace encore présente reste dans la bulle d'alerte jusqu'à ce que Defender s'en soit occupé, et une notification système s'affiche pour que tu la voies même si Prinny est caché. Une menace déjà neutralisée donne une bulle ponctuelle. L'ancien historique est ignoré au lancement.
+- **Analyser un fichier…** : choisis un fichier (un téléchargement, un document Office...) et Defender l'analyse ; Prinny dit si une menace a été trouvée.
+- **Ouvrir Sécurité Windows** ouvre la fenêtre de Defender.
+
+Il faut que Microsoft Defender soit ton antivirus actif ; avec un autre antivirus, le menu l'indique.
+
 ## Ne pas déranger
 
 Quand Windows signale une appli, un jeu ou une présentation en plein écran, Prinny se cache et n'affiche rien. Il revient à la fin. Désactivable dans clic droit → **Options**.
@@ -102,6 +113,7 @@ Prinaka/
 │   ├── alerts.py        # Règles d'alerte RAM / CPU / disque / température / batterie
 │   ├── reactions.py     # Quand Prinny commente quelque chose
 │   ├── quotes.py        # Sélection des citations par langue
+│   ├── defender.py      # Relais Windows Defender (détections, analyse de fichier)
 │   ├── fullscreen.py    # Détection plein écran / présentation
 │   ├── tray.py          # Icône de la barre système
 │   ├── menu_style.py    # Style commun des menus contextuels

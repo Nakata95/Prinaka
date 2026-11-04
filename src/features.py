@@ -5,6 +5,7 @@ Optional behaviours of Prinny, kept out of prinny.py:
 
 - random quotes and contextual reactions (quotes.py, reactions.py)
 - system alerts: RAM, CPU, disk, temperature, battery (alerts.py)
+- Windows Defender relay: detections and file scans (defender.py)
 - do-not-disturb during full-screen apps (fullscreen.py)
 - system tray icon (tray.py) and launch at Windows startup (startup.py)
 
@@ -14,18 +15,21 @@ submenu to the right-click menu: the builders return a dict mapping each
 clickable QAction to the callable to run once the menu closes.
 """
 
+import os
 import random
 from datetime import datetime
 
 import psutil
 from PyQt5 import sip
-from PyQt5.QtWidgets import QAction, QApplication, QSystemTrayIcon
+from PyQt5.QtWidgets import QAction, QApplication, QFileDialog, QSystemTrayIcon
 from PyQt5.QtCore import QTimer
 
+import defender
 import startup
 from alerts import RULES, AlertMonitor, get_rule
 from fullscreen import is_fullscreen_busy
 from listeners import get_click_count, get_key_count
+from poller import BackgroundPoller
 from quotes import get_quote
 from reactions import ReactionEngine
 from tray import TrayIcon
@@ -47,6 +51,8 @@ QUOTE_DURATION_MS    = 8000
 REACTION_DURATION_MS = 7000
 
 ALERT_INTERVAL_MS      = 10000
+DEFENDER_INTERVAL_S    = 60
+THREAT_DURATION_MS     = 15000
 REACTION_INTERVAL_MS   = 20000
 FULLSCREEN_INTERVAL_MS = 2000
 GREETING_DELAY_MS      = 5000
@@ -84,6 +90,18 @@ class FeaturesMixin:
         self._alert_timer = QTimer(self)
         self._alert_timer.timeout.connect(self._check_alerts)
         self._alert_timer.start(ALERT_INTERVAL_MS)
+
+        # --- Windows Defender relay ---
+        self._seen_detections   = set()    # keys already reported
+        self._defender_ready    = False    # first reading done
+        self._defender_available = None    # None = not known yet
+        self._threat_lines      = []       # active threats, shown in the alert bubble
+        self._threat_new        = False    # a threat appeared since the last alert check
+        self._scan_job          = None
+        self._defender_poller = BackgroundPoller(self._read_defender, DEFENDER_INTERVAL_S, self, com=False)
+        self._defender_poller.updated.connect(self._on_defender)
+        if self.config.get("defender_enabled"):
+            self._defender_poller.start()
 
         # --- Do not disturb ---
         self._fullscreen_timer = QTimer(self)
@@ -180,16 +198,17 @@ class FeaturesMixin:
         if self._silenced():
             return   # the bubble is rebuilt when Prinny is visible again
 
-        if not active:
+        if not active and not self._threat_lines:
             self._close_alert_bubble()
             return
 
         message = "\n".join(
-            t(rule.message_key).format(value=int(value), percent=int(value))
-            for rule, value in active
+            [t(rule.message_key).format(value=int(value), percent=int(value)) for rule, value in active]
+            + self._threat_lines
         )
 
-        if new:
+        if new or self._threat_new:
+            self._threat_new = False
             self._play_drag_sound()
             self._set_anim("fail")
             self._fail_active = True
@@ -210,6 +229,97 @@ class FeaturesMixin:
         self.config.set(get_rule(key).threshold_key, value)
         self._alert_monitor.clear(key)
         self._check_alerts()
+
+    # -----------------------------------------------------------------------
+    # Windows Defender relay
+    # -----------------------------------------------------------------------
+
+    def _read_defender(self, cycle: int) -> dict:
+        """Run in the background thread (see BackgroundPoller)."""
+        return {"detections": defender.read_detections()}
+
+    def _on_defender(self, data: dict) -> None:
+        """Report new detections; keep still-active threats in the alert bubble."""
+        detections = data["detections"]
+        self._defender_available = detections is not None
+        if detections is None:
+            self._threat_lines = []
+            self._check_alerts()
+            return
+
+        first = not self._defender_ready
+        self._defender_ready = True
+
+        fresh = defender.new_detections(self._seen_detections, detections)
+        if first:   # the history is old news: only threats still present matter
+            fresh = [d for d in fresh if d.active]
+
+        self._threat_lines = [
+            t("sec_threat_line").format(name=d.title, target=d.target).strip()
+            for d in detections if d.active
+        ]
+        self._threat_new = any(d.active for d in fresh)
+
+        for d in fresh:
+            key = "sec_threat" if d.active else "sec_blocked"
+            self._notify_security(t(key).format(name=d.title, target=d.target))
+            if not d.active:
+                self._show_bubble(t("sec_blocked").format(name=d.title, target=d.target), THREAT_DURATION_MS)
+        self._check_alerts()
+
+    def _notify_security(self, text: str) -> None:
+        """System notification, so a threat is seen even when Prinny is hidden."""
+        tray = getattr(self, "_tray", None)
+        if tray:
+            tray.showMessage("Prinaka", text, QSystemTrayIcon.Warning, 10000)
+
+    def set_defender_enabled(self, enabled: bool) -> None:
+        self.config.set("defender_enabled", enabled)
+        if enabled:
+            self._defender_poller.start()
+        else:
+            self._defender_poller.stop()
+            self._threat_lines = []
+            self._check_alerts()
+
+    def scan_file_dialog(self) -> None:
+        """Ask for a file and have Defender scan it."""
+        if self._scan_job and self._scan_job.running:
+            self._show_bubble(t("sec_scan_busy"), 4000)
+            return
+
+        path, _ = QFileDialog.getOpenFileName(self, t("sec_pick_file"))
+        if not path:
+            return
+
+        if not self._scan_job:
+            self._scan_job = defender.ScanJob(self)
+            self._scan_job.finished.connect(self._on_scan_finished)
+        self._show_bubble(t("sec_scanning").format(file=os.path.basename(path)), 5000)
+        self._scan_job.start(path)
+
+    def _on_scan_finished(self, result: dict) -> None:
+        name = os.path.basename(result["path"])
+        if result["status"] == "clean":
+            self._show_bubble(t("sec_scan_clean").format(file=name), 8000)
+        elif result["status"] == "threat":
+            text = t("sec_scan_threat").format(file=name, name=", ".join(result["threats"]))
+            self._show_bubble(text, THREAT_DURATION_MS)
+            self._notify_security(text)
+            self._set_anim("fail")
+            self._fail_active = True
+            QTimer.singleShot(3000, self._end_fail)
+        else:
+            text = t("sec_scan_error").format(file=name)
+            if result.get("reason"):
+                text += f"\n{result['reason'][:160]}"
+            self._show_bubble(text, 12000)
+
+    def open_windows_security(self) -> None:
+        try:
+            os.startfile("windowsdefender:")
+        except OSError:
+            pass
 
     # -----------------------------------------------------------------------
     # Do not disturb / visibility
@@ -358,6 +468,26 @@ class FeaturesMixin:
                     rule_menu, f"{rule.symbol} {preset}{rule.unit}", preset == threshold
                 )
                 handlers[action] = lambda r=rule, v=preset: self.set_alert_threshold(r.key, v)
+
+        return handlers
+
+    def _build_security_menu(self, menu) -> dict:
+        """Submenu: Defender relay, scan a file, open Windows Security."""
+        handlers = {}
+        sub = menu.addMenu(t("menu_security"))
+
+        if self._defender_available is False and self.config.get("defender_enabled"):
+            sub.addAction(t("sec_unavailable")).setEnabled(False)
+            sub.addSeparator()
+
+        watch = self._check_action(sub, t("menu_defender_watch"), self.config.get("defender_enabled"))
+        handlers[watch] = lambda a=watch: self.set_defender_enabled(a.isChecked())
+
+        sub.addSeparator()
+        scan = sub.addAction(t("menu_scan_file"))
+        handlers[scan] = self.scan_file_dialog
+        open_security = sub.addAction(t("menu_open_security"))
+        handlers[open_security] = self.open_windows_security
 
         return handlers
 

@@ -150,5 +150,19 @@
     "player_repeat": "Repeat: off",
     "player_shuffle_on": "Shuffle: on",
     "player_repeat_all": "Repeat: all",
-    "player_repeat_track": "Repeat: this track"
+    "player_repeat_track": "Repeat: this track",
+    "menu_security": "🛡 Security",
+    "menu_defender_watch": "Watch Windows Defender",
+    "menu_scan_file": "🔍 Scan a file…",
+    "menu_open_security": "Open Windows Security",
+    "sec_unavailable": "Defender unavailable (another antivirus?)",
+    "sec_pick_file": "Choose a file to scan",
+    "sec_threat_line": "🛡 Threat: {name} {target}",
+    "sec_threat": "Defender detected a threat: {name} {target}",
+    "sec_blocked": "🛡 Defender neutralized {name} {target}",
+    "sec_scanning": "🔍 Scanning {file}…",
+    "sec_scan_busy": "A scan is already running.",
+    "sec_scan_clean": "✅ {file}: no threat found",
+    "sec_scan_threat": "🚨 {file}: threat found ({name})",
+    "sec_scan_error": "⚠ Could not scan {file}"
 }

@@ -150,5 +150,19 @@
     "player_repeat": "Répétition : désactivée",
     "player_shuffle_on": "Aléatoire : activé",
     "player_repeat_all": "Répétition : tout (liste)",
-    "player_repeat_track": "Répétition : ce morceau"
+    "player_repeat_track": "Répétition : ce morceau",
+    "menu_security": "🛡 Sécurité",
+    "menu_defender_watch": "Surveiller Windows Defender",
+    "menu_scan_file": "🔍 Analyser un fichier…",
+    "menu_open_security": "Ouvrir Sécurité Windows",
+    "sec_unavailable": "Defender indisponible (autre antivirus ?)",
+    "sec_pick_file": "Choisir un fichier à analyser",
+    "sec_threat_line": "🛡 Menace : {name} {target}",
+    "sec_threat": "Menace détectée par Defender : {name} {target}",
+    "sec_blocked": "🛡 Defender a neutralisé {name} {target}",
+    "sec_scanning": "🔍 Analyse de {file}…",
+    "sec_scan_busy": "Une analyse est déjà en cours.",
+    "sec_scan_clean": "✅ {file} : aucune menace trouvée",
+    "sec_scan_threat": "🚨 {file} : menace trouvée ({name})",
+    "sec_scan_error": "⚠ Impossible d'analyser {file}"
 }

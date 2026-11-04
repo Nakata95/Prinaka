@@ -737,6 +737,7 @@ class Prinny(FeaturesMixin, QWidget):
         handlers = {}
         handlers.update(self._build_dialogue_menu(menu))
         handlers.update(self._build_alert_menu(menu))
+        handlers.update(self._build_security_menu(menu))
         menu.addSeparator()
 
         # Media toggle

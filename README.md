@@ -17,6 +17,7 @@ An animated desktop buddy based on **Prinny** from the *Disgaea* series, built w
 - 💬 Speech bubbles in English / French: random quotes and contextual reactions (greetings, late night, click/keystroke milestones, battery plugged in/out), all optional
 - 📡 Compact network monitor (latency, upload, download) to keep on top of an online game or a call
 - 🎮 Do not disturb — Prinny hides and stays silent while a full-screen app (game, video) is running
+- 🛡 Windows Defender relay — alerts when Defender finds a threat, and a "Scan a file" entry (nothing leaves your PC)
 - 🧷 System tray icon to show/hide Prinny or quit
 - 🚀 Optional launch at Windows startup
 - 🎮 Discord Rich Presence — custom profiles with live preview, one-click switching from the right-click menu, auto-reconnect
@@ -75,6 +76,16 @@ Right-click (or tray icon) → **Network monitor**: a small always-on-top window
 
 The system info window and this one use the same button to open *and* close them, even if one was dragged out of sight, and reopen in the middle of the screen when their position is lost.
 
+## Security (Windows Defender)
+
+Right-click → **Security**. Prinny does not detect malware himself: he reads what Microsoft Defender reports, locally, and relays it.
+
+- **Watch Windows Defender** (on by default): every minute Prinny checks Defender's detections. A threat that is still present stays in the alert bubble until Defender has dealt with it, and a system notification is shown so you see it even with Prinny hidden. A threat Defender already neutralized shows a one-off bubble. Old history is ignored at launch.
+- **Scan a file…**: pick a file (a download, an Office document...) and Defender scans it; Prinny tells you whether a threat was found.
+- **Open Windows Security** opens Defender's own window.
+
+It needs Microsoft Defender to be your active antivirus; with another antivirus the menu says so.
+
 ## Do not disturb
 
 While Windows reports a full-screen app, game or presentation, Prinny hides and shows nothing. He comes back when it ends. Turn it off in right-click → **Options**.
@@ -102,6 +113,7 @@ Prinaka/
 │   ├── alerts.py        # RAM / CPU / disk / temperature / battery alert rules
 │   ├── reactions.py     # When Prinny comments on something
 │   ├── quotes.py        # Localized quote picker
+│   ├── defender.py      # Windows Defender relay (detections, file scan)
 │   ├── fullscreen.py    # Full-screen / presentation detection
 │   ├── tray.py          # System tray icon
 │   ├── menu_style.py    # Shared look of the context menus

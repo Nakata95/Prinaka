@@ -24,6 +24,7 @@ Stored settings:
 - quotes_enabled      : random quote bubbles (bool)
 - quotes_frequency    : 'low', 'normal' or 'high' (str)
 - reactions_enabled   : contextual reactions, see reactions.py (bool)
+- defender_enabled    : relay Windows Defender detections (bool)
 - dnd_fullscreen      : hide Prinny and stay silent during full-screen apps (bool)
 - info_window_pos     : last position of the system info window, "x,y" (str)
 - net_window_pos      : last position of the network overlay, "x,y" (str)
@@ -62,6 +63,7 @@ DEFAULTS = {
     "quotes_frequency":    "normal",
     "reactions_enabled":   True,
     "dnd_fullscreen":      True,
+    "defender_enabled":    True,
     "info_window_pos":     "",
     "net_window_pos":      "",
     "presence_autostart":  False,
