@@ -20,12 +20,16 @@ from utils import t
 
 
 WALK_TO_TIMEOUT_S = 30
+REACTION_MS       = 4500       # how long a mood animation lasts after an answer
+
+# Mood of an answer (see ai.split_mood) -> the animation that plays
+MOOD_ANIMATIONS = {"shrug": "shrug", "grimace": "grimace", "joy": "hype", "sulk": "fail"}
 MAX_JUMPS         = 5
 
 # Behaviour name (see ai_tools.BEHAVIORS) -> Prinny's forced state, the same ones as the right-click menu
 BEHAVIOR_STATES = {
     "free": None, "stay_still": "idle", "keep_moving": "walk",
-    "keep_busy": "inspect_menu", "express": "hype", "punish": "fail",
+    "keep_busy": "inspect_menu", "express": "hype", "punish": "fail", "grimace": "grimace", "shrug": "shrug", "attack": "attack", "shock": "shock", "cry": "cry", "eat": "eat",
 }
 
 # Flag set while an animation plays, and the callback that ends it
@@ -49,6 +53,50 @@ class AssistantMixin:
         self._chat_window  = None   # created on first use (see toggle_chat_window)
         self._chat_session = None
 
+    # -----------------------------------------------------------------------
+    # Animation that follows the conversation
+    # -----------------------------------------------------------------------
+
+    _reaction_anim  = None      # animation played over his usual behaviour, or None
+    _reaction_busy  = False     # it is the "busy" one, kept until the answer arrives
+    _reaction_token = 0
+
+    def _can_react(self) -> bool:
+        """False when he must not be interrupted: dragged, hidden, jumping, on his way somewhere or under an order."""
+        return not (self._dragging or self._forced_state or self._goto_x is not None or self._jumping
+                    or self._menu_active or self._silenced() or getattr(self, "_crying", False))
+
+    def _start_reaction(self, anim: str, duration_ms: int | None) -> None:
+        self._reaction_token += 1
+        self._reaction_anim = anim
+        self._set_anim(anim)
+        if duration_ms:
+            token = self._reaction_token
+            QTimer.singleShot(duration_ms, lambda: self._end_reaction(token))
+
+    def _end_reaction(self, token: int | None = None) -> None:
+        if token is not None and token != self._reaction_token:
+            return                                  # a newer reaction replaced this one
+        self._reaction_anim = None
+        self._reaction_busy = False
+        if not self._dragging:
+            self._set_anim("idle")
+
+    def set_chat_busy(self, busy: bool) -> None:
+        """He keeps busy (the inspection animation) while he works on a message of the chat."""
+        if busy:
+            if self._can_react():
+                self._reaction_busy = True
+                self._start_reaction("inspect", None)
+        elif self._reaction_busy:
+            self._end_reaction()
+
+    def react_to_mood(self, mood: str) -> None:
+        """Shrug, make a face, rejoice or sulk for a few seconds, as the answer said."""
+        anim = MOOD_ANIMATIONS.get(mood)
+        if anim and self._can_react():
+            self._start_reaction(anim, REACTION_MS)
+
     def is_chat_window_visible(self) -> bool:
         return bool(self._chat_window) and self._chat_window.isVisible()
 
@@ -63,7 +111,8 @@ class AssistantMixin:
             self._chat_session = ai.ChatSession(
                 build_tools(self), self.config.get("ai_model"), self,
             )
-            self._chat_window = ChatWindow(self.config, self._chat_session, self._ai_system_prompt)
+            self._chat_window = ChatWindow(self.config, self._chat_session, self._ai_system_prompt,
+                                           on_busy=self.set_chat_busy, on_mood=self.react_to_mood)
         self._chat_window.open(near=self)
 
     def _ai_system_prompt(self) -> str:

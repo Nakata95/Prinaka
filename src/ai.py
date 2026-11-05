@@ -15,6 +15,7 @@ Everything stays on this PC: nothing is sent to an online service.
 import difflib
 import json
 import threading
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -58,7 +59,7 @@ SAMPLING = {
 # Tools whose output or arguments are personal (addresses, user and PC names, running programs,
 # threats, pages visited, searches). They are used for the answer, then forgotten: nothing of
 # them stays in the history sent with the next messages, and the answer that quotes them goes too.
-SENSITIVE_TOOLS = ("run_command", "diagnostic", "get_status", "open_website", "open_search", "git_status")
+SENSITIVE_TOOLS = ("run_command", "diagnostic", "get_status", "open_website", "open_search", "git_status", "port_owner")
 FORGOTTEN       = "(not kept)"
 
 
@@ -117,11 +118,14 @@ def is_running() -> bool:
     return installed_models() is not None
 
 
-def chat(model: str, messages: list, tools: list | None = None, temperature: float | None = None) -> dict:
+def chat(model: str, messages: list, tools: list | None = None, temperature: float | None = None,
+         max_tokens: int | None = None) -> dict:
     """One call to /api/chat; returns the assistant message (content, tool_calls)."""
     options = dict(SAMPLING)
     if temperature is not None:
         options["temperature"] = temperature
+    if max_tokens is not None:
+        options["num_predict"] = max_tokens
     body = {
         "model": model, "messages": messages, "stream": False,
         "think": False, "keep_alive": KEEP_ALIVE, "options": options,
@@ -134,6 +138,57 @@ def chat(model: str, messages: list, tools: list | None = None, temperature: flo
 # ---------------------------------------------------------------------------
 # Conversation
 # ---------------------------------------------------------------------------
+
+MOODS       = ("calm", "joy", "grimace", "shrug")
+MOOD_TOKENS = 6
+MOOD_PROMPT = (
+    "You label the mood of a sarcastic penguin's answer so that his body can act it out. Reply with exactly one word.\n"
+    'calm: the default. Information, a task reported as done, a normal chat answer, even with a dry or sarcastic remark.\n'
+    'joy: he is openly happy, excited, thanks or congratulates someone.\n'
+    "grimace: ONLY when he is clearly goofing off: sticking his tongue out, 'nananere', 'bleh', laughing out loud at the user, playing the clown. A light tease or a question is NOT a grimace.\n"
+    'shrug: he says he does not know, has no answer, cannot do it or failed.\n'
+    'Examples:\n'
+    "- 'Le volume est a 30%.' -> calm\n"
+    "- 'Voila, c'est fait. Tu as besoin d'autre chose ?' -> calm\n"
+    "- 'Pas mal ton idee, pour un humain.' -> calm\n"
+    "- 'Genial !! Merci, tu me rends tout content !' -> joy\n"
+    "- 'Bleh ! Attrape-moi si tu peux, nananere !' -> grimace\n"
+    "- 'Hahaha tu es tombe dans le panneau, quel pigeon !' -> grimace\n"
+    "- 'Aucune idee, desole.' -> shrug\n"
+    "- 'Je n'ai pas reussi, ca ne marche pas.' -> shrug")
+
+
+def mentions(text: str, words: str) -> bool:
+    """True if the text contains one of the comma separated word stems (accents and case ignored)."""
+    def plain(s: str) -> str:
+        return "".join(c for c in unicodedata.normalize("NFD", s.lower().replace("\u2019", "'")) if not unicodedata.combining(c))
+    low = plain(text)
+    return any(w.strip() and plain(w.strip()) in low for w in words.split(","))
+
+
+def classify_mood(model: str, user_text: str, answer: str, shrug_words: str = "", grimace_words: str = "") -> str:
+    """
+    The mood of Prinny's answer, for his animation: 'calm', 'joy', 'grimace' or 'shrug'.
+
+    A second, tiny call to the model, made after the answer is already on screen: asking for the mood
+    inside the main call made the model write text instead of using its tools. Its sarcastic
+    answers all look like teasing, so the label is checked: the answer saying "I do not know" or
+    "I cannot" is what makes a shrug, and a grimace needs the answer or the request to show goofing off.
+    """
+    messages = [{"role": "system", "content": MOOD_PROMPT},
+                {"role": "user", "content": f"The user said: {user_text}\nThe penguin answered: {answer}\nMood:"}]
+    try:
+        word = (chat(model, messages, temperature=0.0, max_tokens=MOOD_TOKENS).get("content") or "").strip().lower()
+    except OllamaError:
+        return "calm"
+    mood = next((m for m in MOODS if m in word), "calm")
+    if shrug_words:
+        # clear "I do not know / I cannot" wording is a shrug whatever the label; without it, no shrug
+        mood = "shrug" if mentions(answer, shrug_words) else ("calm" if mood == "shrug" else mood)
+    if mood == "grimace" and grimace_words and not (mentions(answer, grimace_words) or mentions(user_text, grimace_words)):
+        mood = "calm"
+    return mood
+
 
 class ToolRequest:
     """A tool call waiting for the GUI thread."""
@@ -160,6 +215,7 @@ class ChatSession(QObject):
     """
 
     reply  = pyqtSignal(str)
+    mood   = pyqtSignal(str)          # calm, joy, grimace or shrug; sent a moment after the reply
     failed = pyqtSignal(str)
     acted  = pyqtSignal(str, str)
     _gui_tool = pyqtSignal(object)    # worker -> GUI thread
@@ -180,7 +236,7 @@ class ChatSession(QObject):
         self._turns = []
 
     def send(self, text: str, system_prompt: str, repeat_nudge: str = "", allowed: set | None = None,
-             search_first: str = "") -> bool:
+             search_first: str = "", shrug_words: str = "", grimace_words: str = "") -> bool:
         """
         Ask the model; False if it is still answering the previous message.
 
@@ -190,13 +246,16 @@ class ChatSession(QObject):
                 questions a small model would otherwise answer from a bad memory.
             allowed: Names of the tools offered; '*' stands for all but the web search;
                 None offers every tool; an empty set is plain conversation.
+            shrug_words: Word stems that show an answer says "I do not know" or "I cannot"; a
+                shrug is only played when one of them is in the answer.
+            grimace_words: The same for a grimace, looked for in the answer and in the request.
         """
         if self._busy:
             return False
         self._busy = True
         schemas = [tool.schema() for name, tool in self._tools.items()
                    if allowed is None or name in allowed or ("*" in allowed and name != "web_search")]
-        threading.Thread(target=self._run, args=(text, system_prompt, schemas, repeat_nudge, search_first),
+        threading.Thread(target=self._run, args=(text, system_prompt, schemas, repeat_nudge, search_first, shrug_words, grimace_words),
                          daemon=True).start()
         return True
 
@@ -211,8 +270,10 @@ class ChatSession(QObject):
         return any(difflib.SequenceMatcher(None, low, old.lower()).ratio() >= SIMILAR_REPLY
                    for old in self._recent_answers())
 
-    def _run(self, text: str, system_prompt: str, schemas: list, repeat_nudge: str, search_first: str) -> None:
+    def _run(self, text: str, system_prompt: str, schemas: list, repeat_nudge: str, search_first: str,
+             shrug_words: str = "", grimace_words: str = "") -> None:
         answer, error = "", ""
+        failed_tool = False
         try:
             # Past tool calls stay in the history: with only the text of earlier
             # answers the model starts claiming actions it never performed.
@@ -243,8 +304,9 @@ class ChatSession(QObject):
                 for call in calls:
                     function = call.get("function", {})
                     name = function.get("name", "")
-                    messages.append({"role": "tool", "tool_name": name,
-                                     "content": self._call_tool(name, function.get("arguments"))})
+                    result = self._call_tool(name, function.get("arguments"))
+                    failed_tool = failed_tool or result.startswith(("error", "FAILED", "PARTIAL"))
+                    messages.append({"role": "tool", "tool_name": name, "content": result})
                     if name == "web_search":
                         schemas = [s for s in schemas if s["function"]["name"] == "web_search"]
             else:
@@ -260,7 +322,11 @@ class ChatSession(QObject):
         if error:
             self.failed.emit(error)
         else:
-            self.reply.emit(answer)
+            self.reply.emit(answer)             # on screen at once; the animation follows
+            if failed_tool:
+                self.mood.emit("shrug")         # something did not work: he shrugs it off
+            elif answer:
+                self.mood.emit(classify_mood(self.model, text, answer, shrug_words, grimace_words))
 
     def _call_tool(self, name: str, args) -> str:
         tool = self._tools.get(name)

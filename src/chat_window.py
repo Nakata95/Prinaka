@@ -70,14 +70,17 @@ class ChatWindow(FloatingWindow):
         "QLineEdit:disabled { color: #6c7086; }"
     )
 
-    def __init__(self, config, session, build_prompt):
+    def __init__(self, config, session, build_prompt, on_busy=None, on_mood=None):
         super().__init__(config, "chat_window_pos", Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setFixedSize(*WINDOW_SIZE)
         self._session      = session
         self._build_prompt = build_prompt
         self._waiting      = False
+        self._on_busy      = on_busy      # called with True while Prinny works on a message
+        self._on_mood      = on_mood      # called with the mood of the answer (see ai.classify_mood)
 
         self._build_ui()
+        session.mood.connect(self._react)
         session.reply.connect(self._on_reply)
         session.failed.connect(self._on_failed)
         session.acted.connect(self._on_acted)
@@ -180,6 +183,8 @@ class ChatWindow(FloatingWindow):
         self._send_btn.setEnabled(not waiting)
         self._clear_btn.setEnabled(not waiting)
         self._status.setText(t("chat_thinking") if waiting else "")
+        if self._on_busy:
+            self._on_busy(waiting)
         if not waiting:
             self._input.setFocus()
 
@@ -197,7 +202,7 @@ class ChatWindow(FloatingWindow):
             allowed.add(SEARCH_TOOL)
             search_first = text.strip()
         prompt = self._build_prompt() + ("" if "*" in allowed else "\n" + t("ai_no_tools"))
-        if self._session.send(text, prompt, t("ai_repeat_nudge"), allowed, search_first):
+        if self._session.send(text, prompt, t("ai_repeat_nudge"), allowed, search_first, t("ai_shrug_words"), t("ai_grimace_words")):
             self._set_waiting(True)
 
     def _run_typed_command(self, text: str) -> bool:
@@ -231,9 +236,14 @@ class ChatWindow(FloatingWindow):
         self._view.append(f"<p style='margin: 0 0 8px 0; font-family: Consolas, monospace; font-size: 12px;"
                           f" color: #a6e3a1;'>{body}</p>")
 
+    def _react(self, mood: str) -> None:
+        if self._on_mood and mood:
+            self._on_mood(mood)
+
     def _on_reply(self, text: str) -> None:
         self._set_waiting(False)
         self._add("Prinny", PRINNY_COLOR, text or t("chat_done"))
+
 
     def _on_failed(self, error: str) -> None:
         self._set_waiting(False)

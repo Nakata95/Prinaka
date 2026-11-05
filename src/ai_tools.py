@@ -25,6 +25,7 @@ import browsers
 import defender
 import git_watch
 import media
+import port_info
 import reminders
 import safe_commands
 import spotify_control
@@ -54,7 +55,7 @@ MAX_JUMPS        = 5
 PLACES           = ("left", "right", "center")
 JUMP_DIRECTIONS  = ("up", "left", "right")
 # What each behaviour means, for the model (same list as the right-click menu)
-BEHAVIORS        = ("free", "stay_still", "keep_moving", "keep_busy", "express", "punish")
+BEHAVIORS        = ("free", "stay_still", "keep_moving", "keep_busy", "express", "punish", "grimace", "shrug", "attack", "shock", "cry", "eat")
 
 
 @dataclass
@@ -362,6 +363,12 @@ def build_tools(prinny) -> dict:
         return safe_commands.run(str(args.get("command", "")).lower(), str(args.get("target", "") or ""),
                                  str(args.get("option", "") or ""))
 
+    def port_owner(args: dict) -> str:
+        port = _number(args, "port")
+        if port is None or port != int(port):
+            return "error: the port must be a whole number from 1 to 65535"
+        return port_info.owners(int(port))
+
     def git_status(args: dict) -> str:
         if not git_watch.available():
             return "error: git is not installed"
@@ -404,6 +411,16 @@ def build_tools(prinny) -> dict:
             return websearch.format_results(websearch.search(query, get_current_language()))
         except websearch.SearchError as e:
             return f"error: search failed, {e}"
+
+    def spawn_entity(args: dict) -> str:
+        kind = str(args.get("kind", "fish")).lower()
+        if kind not in ("fish", "food", "rabbit", "pumpkin", "bat", "wrestler"):
+            return "error: the only things that can be dropped for now are a fish, a dish of food, a rabbit, a pumpkin, bats and a wrestler"
+        if kind == "food":
+            done, message = prinny.spawn_bowl()
+        else:
+            done, message = prinny.spawn_fish() if kind == "fish" else prinny.spawn_opponent(kind)
+        return message if done else f"error: {message}"
 
     def set_volume(args: dict) -> str:
         level = _number(args, "level")
@@ -465,8 +482,14 @@ def build_tools(prinny) -> dict:
         Tool("set_behavior", "Give Prinny an order about what he does, until told otherwise. "
              "keep_moving: move, walk around, run around. stay_still: stop moving, stay quiet and still. "
              "express: go wild, express yourself, dance, party. keep_busy: get busy, look around, inspect, "
-             "do something. punish: be grumpy, punish yourself. free: do whatever you want again, back to normal.",
+             "do something. punish: be grumpy, punish yourself. grimace: make faces, pull a face, stick your tongue out. "
+             "shrug: shrug your shoulders, act clueless. attack: fight, attack, draw the knives. shock: be shocked, scream in surprise. cry: cry, sob, be sad. eat: eat, munch. "
+             "free: do whatever you want again, back to normal.",
              {"mode": {"type": "string", "enum": list(BEHAVIORS)}}, ("mode",), set_behavior),
+        Tool("spawn_entity", "Drop a fish on the desktop. It runs away from Prinny and jumps over him; Prinny hunts it, "
+             "catches it, holds it up and puts it in his bag. Use it when the user asks to drop, throw or put down a fish, "
+             "or to give Prinny something to catch. kind=food puts a dish (a bowl of ramen or a ham, at random) that Prinny goes to eat. kind=rabbit, pumpkin, wrestler or bat (a group of three bats) makes the opponent drop in and fight Prinny, a staged duel.",
+             {"kind": {"type": "string", "enum": ["fish", "food", "rabbit", "pumpkin", "bat", "wrestler"]}}, (), spawn_entity),
         Tool("set_volume", "Set the volume of Prinny's sounds, from 0 to 100.",
              {"level": {"type": "integer"}}, ("level",), set_volume),
         Tool("set_muted", "Mute or unmute Prinny's sounds.",
@@ -506,6 +529,12 @@ def build_tools(prinny) -> dict:
              ("command",), run_command, gui=False,
              describe=lambda a: safe_commands.display(str(a.get("command", "")).lower(), str(a.get("target", "") or ""),
                                                       str(a.get("option", "") or ""))),
+        Tool("port_owner", "Find which program uses a network port, read-only: its name, process number, path, how long it "
+             "has run, whether it is open to the network. Use it when the user asks who or what uses a port (3000, 8080...) "
+             "or gets 'port already in use'. It cannot stop anything: if the user wants it stopped, tell them to close it "
+             "themselves (you give the name and the process number).",
+             {"port": {"type": "integer", "description": "1 to 65535"}}, ("port",), port_owner, gui=False,
+             describe=lambda a: str(a.get("port", ""))),
         Tool("git_status", "Read-only state of the user's registered git projects: branch, changed files and since when, "
              "commits not pushed or to pull, last commits. Use it when the user asks where they stand on a project, "
              "what is not committed or pushed. It changes nothing; you can never commit or push.",

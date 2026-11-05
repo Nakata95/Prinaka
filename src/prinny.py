@@ -35,6 +35,9 @@ from speech_bubble import SpeechBubble
 from features import FeaturesMixin
 from ai_assistant import AssistantMixin
 from dev_tools import DevToolsMixin
+from world import WorldMixin
+from fight import FightMixin
+from food import FoodMixin
 from menu_style import style_menu
 from discord_presence import (
     DiscordPresenceManager, STATUS_TEXTS, find_profile, load_profiles,
@@ -45,7 +48,14 @@ from discord_presence import (
 # Constants
 # ---------------------------------------------------------------------------
 
-ANIMATIONS      = ["idle", "walk", "drag", "fall", "inspect", "hype", "fail"]
+ANIMATIONS      = ["idle", "walk", "drag", "fall", "inspect", "hype", "fail", "grimace", "shrug", "attack", "shock", "cry", "eat"]
+THROW_MIN       = 250       # px/s: a gesture slower than this just drops him
+THROW_MAX       = 1300      # px/s: the fastest he can be thrown
+THROW_WINDOW_S  = 0.12      # the throw speed is the speed of the mouse over the last moments
+THROW_BOUNCE    = 0.35      # how much speed is left after hitting the side or the top of the screen
+MIMIC_CHANCE    = 0.04      # per random choice: now and then he shrugs or makes a face
+MIMIC_SECONDS   = (3, 5)
+MIMIC_BLOCKED_SKINS = ('gentleman',)    # its shrug and grimace are nearly the same as standing still
 TIMER_INTERVAL  = 90        # ms between each game loop tick
 ANIM_INTERVAL   = 50        # ms between each animation frame
 GRAVITY         = 10
@@ -68,7 +78,7 @@ PRESENCE_ENABLED = False
 # Prinny widget
 # ---------------------------------------------------------------------------
 
-class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
+class Prinny(FoodMixin, FightMixin, WorldMixin, DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
     """
     The main animated desktop buddy widget.
 
@@ -87,6 +97,8 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
         "summer":    (165, 165),
         "golden":    (165, 165),
         "dengeki":   (165, 165),
+        "famitsu":   (165, 165),
+        "king":      (165, 165),
     }
 
     # --- System alert thresholds ---
@@ -146,6 +158,8 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
 
         # --- Behaviour flags ---
         self._dragging       = False
+        self._throw          = None   # [vx, vy] in pixels per tick while he flies after a throw
+        self._drag_trail     = []     # (time, x, y) of the mouse while he is dragged
         self._drag_prev_pos  = QPoint()
         self._menu_active    = False
         self._forced_state   = None
@@ -196,6 +210,9 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
         self._init_features()
         self._init_assistant()
         self._init_dev_tools()
+        self._init_world()
+        self._init_fight()
+        self._init_food()
 
         # --- Info window (lazy init) ---
         self._info_window = None
@@ -272,6 +289,8 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
         center_x = self.x() + self.width() // 2
         bottom   = self.y() + self.height()
 
+        if getattr(self, "_fight", None) is not None:
+            self._end_fight(aborted=True)       # the opponent is sized at the start: a new fight takes the new size
         self._scale = percent
         self.config.set("size_percent", percent)
         self._skins   = {name: self._scale_skin(frames) for name, frames in self._base_skins.items()}
@@ -399,6 +418,7 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
                 pixmap = pixmap.transformed(QTransform().scale(-1, 1))
 
             self._label.setPixmap(pixmap)
+            self._flames_follow()
 
 
     # -----------------------------------------------------------------------
@@ -424,6 +444,17 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
             self._reset_behaviour_flags()
             self._set_anim("drag")
             self._play_drag_sound()
+            self._update_frame()
+            return
+
+        # --- A staged fight: the script moves him (see fight.py) ---
+        if self._fight is not None:
+            self._update_frame()
+            return
+
+        # --- Flying after a throw ---
+        if self._throw is not None:
+            self._throw_step(total_rect, ground_y)
             self._update_frame()
             return
 
@@ -517,6 +548,9 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
 
     def _pick_random_behaviour(self) -> None:
         """Randomly choose the next autonomous behaviour."""
+        if self._current_skin not in MIMIC_BLOCKED_SKINS and random.random() < MIMIC_CHANCE:
+            self._start_reaction(random.choice(("grimace", "shrug")), random.randint(*MIMIC_SECONDS) * 1000)
+            return
         r = random.random()
 
         if r < 0.3:
@@ -567,12 +601,17 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
             self._fail_active,
             self._idle_active,
             self._menu_active,
-            self._forced_state in ("inspect_menu", "fail", "hype"),
+            self._forced_state in ("inspect_menu", "fail", "hype", "grimace", "shrug", "attack", "shock", "cry", "eat"),
+            self._reaction_anim is not None,
         ])
 
     def _apply_behaviour_anim(self) -> None:
         """Set the correct animation for the currently active behaviour."""
-        if self._inspect_active or self._forced_state == "inspect_menu":
+        if self._reaction_anim:                      # follows the conversation (see ai_assistant.py)
+            self._set_anim(self._reaction_anim)
+        elif self._forced_state in ("grimace", "shrug", "attack", "shock", "cry", "eat"):   # an explicit order wins over a random behaviour in progress
+            self._set_anim(self._forced_state)
+        elif self._inspect_active or self._forced_state == "inspect_menu":
             self._set_anim("inspect")
         elif self._hype_active or self._forced_state == "hype":
             self._set_anim("hype")
@@ -590,6 +629,7 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
         self._fail_active    = False
         self._forced_state   = None
         self._goto_x         = None
+        self._reaction_anim  = None
 
 
     # -----------------------------------------------------------------------
@@ -629,7 +669,9 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._dragging      = True
+            self._throw         = None
             self._drag_prev_pos = event.globalPos()
+            self._drag_trail    = [(time.monotonic(), event.globalPos().x(), event.globalPos().y())]
 
     def mouseMoveEvent(self, event) -> None:
         if not self._dragging:
@@ -644,11 +686,55 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
         self.move(int(new_x), int(new_y))
 
         self._direction = 1 if delta.x() > 0 else -1
+        now = time.monotonic()
+        self._drag_trail.append((now, event.globalPos().x(), event.globalPos().y()))
+        self._drag_trail = [pt for pt in self._drag_trail if now - pt[0] <= THROW_WINDOW_S * 3]
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._dragging = False
+            self._throw = self._throw_from_mouse()
             self._set_anim("fall")
+
+    def _throw_from_mouse(self):
+        """[vx, vy] in pixels per tick if the mouse was moving fast enough when he was let go, else None (he just drops)."""
+        now = time.monotonic()
+        recent = [pt for pt in self._drag_trail if now - pt[0] <= THROW_WINDOW_S]
+        self._drag_trail = []
+        if len(recent) < 2 or recent[-1][0] <= recent[0][0]:
+            return None
+        span = recent[-1][0] - recent[0][0]
+        vx, vy = (recent[-1][1] - recent[0][1]) / span, (recent[-1][2] - recent[0][2]) / span
+        speed = (vx * vx + vy * vy) ** 0.5
+        if speed < THROW_MIN:
+            return None
+        if speed > THROW_MAX:
+            vx, vy = vx * THROW_MAX / speed, vy * THROW_MAX / speed
+        if abs(vx) > 40:
+            self._direction = 1 if vx > 0 else -1
+        tick = TIMER_INTERVAL / 1000
+        return [vx * tick, vy * tick]
+
+    def _throw_step(self, total_rect, ground_y: int) -> None:
+        """One tick of a flight after a throw: gravity, a bounce off the sides and the top, then he lands."""
+        vx, vy = self._throw
+        vy = min(vy + GRAVITY * FALL_SMOOTH, MAX_FALL_SPEED)
+        x, y = self.x() + vx, self.y() + vy
+        left, right = total_rect.left(), total_rect.right() - self.width()
+        if x < left:
+            x, vx = left, abs(vx) * THROW_BOUNCE
+        elif x > right:
+            x, vx = right, -abs(vx) * THROW_BOUNCE
+        if y < total_rect.top():
+            y, vy = total_rect.top(), abs(vy) * THROW_BOUNCE
+        if abs(vx) > 6:
+            self._direction = 1 if vx > 0 else -1
+        if y >= ground_y:
+            y, self._throw, self._vy = ground_y, None, 0
+        else:
+            self._throw = [vx, vy]
+        self.move(int(x), int(y))
+        self._set_anim("fall")
 
     def moveEvent(self, event) -> None:
         """Keep all speech bubbles above Prinny when he moves."""
@@ -763,6 +849,12 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
         web_action = QAction(t("menu_web_search"), self, checkable=True)
         web_action.setChecked(self.config.get("web_search_enabled"))
         menu.addAction(web_action)
+        fish_action = menu.addAction(t("menu_fish"))
+        food_action = menu.addAction(t("menu_food"))
+        rabbit_action = menu.addAction(t("menu_rabbit"))
+        pumpkin_action = menu.addAction(t("menu_pumpkin"))
+        bat_action = menu.addAction(t("menu_bat"))
+        wrestler_action = menu.addAction(t("menu_wrestler"))
         menu.addSeparator()
 
         # Behavior submenu (the forced state is checked)
@@ -775,6 +867,12 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
             ("menu_keep_busy",   "inspect_menu"),
             ("menu_express",     "hype"),
             ("menu_punish",      "fail"),
+            ("menu_grimace",     "grimace"),
+            ("menu_shrug",       "shrug"),
+            ("menu_attack",      "attack"),
+            ("menu_shock",       "shock"),
+            ("menu_cry",         "cry"),
+            ("menu_eat",         "eat"),
         ):
             action = QAction(t(key), self, checkable=True)
             action.setChecked(self._forced_state == state)
@@ -871,6 +969,15 @@ class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
             self.toggle_chat_window()
         elif chosen == web_action:
             self.config.set("web_search_enabled", web_action.isChecked())
+        elif chosen == food_action:
+            if not self.spawn_bowl()[0]:
+                self._show_bubble(t("food_enough"), 4000)
+        elif chosen == fish_action:
+            if not self.spawn_fish()[0]:
+                self._show_bubble(t("world_fish_enough"), 4000)
+        elif chosen in (rabbit_action, pumpkin_action, bat_action, wrestler_action):
+            if not self.spawn_opponent({rabbit_action: "rabbit", pumpkin_action: "pumpkin", bat_action: "bat", wrestler_action: "wrestler"}[chosen])[0]:
+                self._show_bubble(t("fight_busy"), 4000)
         elif chosen == spotify_action:
             self._spotify_only = spotify_action.isChecked()
             self.config.set("media_spotify_only", self._spotify_only)
