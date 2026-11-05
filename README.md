@@ -18,6 +18,7 @@ An animated desktop buddy based on **Prinny** from the *Disgaea* series, built w
 - 📡 Compact network monitor (latency, upload, download) to keep on top of an online game or a call
 - 🎮 Do not disturb — Prinny hides and stays silent while a full-screen app (game, video) is running
 - 🛡 Windows Defender relay — alerts when Defender finds a threat, and a "Scan a file" entry (nothing leaves your PC)
+- 💬 Chat with Prinny through a local AI (Ollama) — he understands orders and acts: move, stop, jump, express himself, go to a place on the screen, skin, size, volume, music, computer status, and he can search the web to answer your questions. The conversation stays on your PC
 - 🧷 System tray icon to show/hide Prinny or quit
 - 🚀 Optional launch at Windows startup
 - 🎮 Discord Rich Presence — custom profiles with live preview, one-click switching from the right-click menu, auto-reconnect
@@ -86,6 +87,32 @@ Right-click → **Security**. Prinny does not detect malware himself: he reads w
 
 It needs Microsoft Defender to be your active antivirus; with another antivirus the menu says so.
 
+## Chat with Prinny (local AI)
+
+Right-click (or tray icon) → **Chat with Prinny**: a chat window where you write to Prinny, who answers in character. He also understands requests and acts: "move!", "stop moving!", "jump!", "go wild!", "keep busy!", "go to the far right of the screen", "set the summer skin", "volume to 20", "next track", "how much RAM am I using?". Behavior orders (move, stay still, express, keep busy, punish, free) last until the next one, like the **Behavior** menu. A small grey line shows each action he performed.
+
+The model runs **on your PC** with [Ollama](https://ollama.com): the conversation is sent nowhere. The one exception is web search (see below).
+
+1. Install Ollama (ollama.com) and start it.
+2. Download the model: `ollama pull qwen3:8b` (about 5 GB; it fits in 8 GB of video memory or runs on the CPU, more slowly).
+3. Open the chat. Another model can be set with the `ai_model` key, for example one of the same size that supports tool calls.
+
+Prinny can only do what `src/ai_tools.py` lists: open a site or a search in your browser, run a few harmless commands, diagnose the PC, search the web, change behavior, run to a place on the screen (sometimes jumping), jump, change skin or size, play an animation, set the volume or mute, control music playback and read the computer's status. The tools are only offered when your message looks like an order: plain conversation never triggers an action. He opens no file and no program and changes nothing on your PC. The model is unloaded from memory after 5 idle minutes. A small model can be wrong: the real state (skin, volume...) is always visible in the interface.
+
+**Web search.** When you ask a factual question ("what is…", "who is…", "explain…", "do you know…", or something he cannot answer), Prinny searches the web then answers from the results, shown by a small grey line. Only the search words leave your PC, not the conversation. He queries DuckDuckGo, with no account or key; when DuckDuckGo blocks him (it can after many searches in a row) he falls back to Wikipedia, which knows people, places, games and terms but not niche topics. He only reads titles and snippets, never a whole page, and obeys no instruction found in a result. Switch: right-click → **Web search for the AI** (on by default). On current events a small model can be wrong even with the results in front of it.
+
+**Browser.** "Go to youtube", "open the Wikipedia site", "do a search on…" or "look that up on google" open your **default browser** (unlike the web search above, here you do the reading). The address opened is shown in the chat. Only `http(s)` addresses with a real domain name are accepted: no file, no `javascript:`, no Windows settings, no IP address, no login in the address. Searches go through DuckDuckGo; change the engine with the `search_engine_url` key (for example `https://www.google.com/search?q={q}`).
+
+You can also ask for **another browser** ("open wikipedia with Firefox") or **private browsing** ("go to youtube in private browsing", "in incognito", "in InPrivate"), alone or together. Chrome, Edge, Firefox, Brave, Opera and Vivaldi are recognised, as long as they are installed; Prinny finds them in Windows' own list of browsers, never from a path given by the AI. Each browser gets its own private option (`--incognito`, `--inprivate`, `-private-window`, `--private`). A private request is never replaced by a normal window: if it cannot be done (browser missing, default browser unknown), Prinny says so and opens nothing.
+
+**Spotify.** "Launch Spotify" opens the app; "play Get Lucky by Daft Punk" or "play some Mozart" starts it if needed and plays what you ask for. Prinny looks the track's link up on the web, then hands it to Spotify like a link clicked in a browser would. If he cannot find the exact track, he only opens the search in Spotify and tells you to press play. Pause, next and previous go through Windows' media controls.
+
+**Commands.** Prinny never receives a free command line: a small model can be wrong or manipulated, and nothing guarantees that a command it wrote is harmless. He picks from the closed list in `src/safe_commands.py`: `ipconfig`, `ping`, `nslookup`, `tracert`, `netstat -n`, `arp`, `getmac`, `route`, `tasklist`, `systeminfo`, `driverquery`, `whoami`, `hostname`, `vol`, `ver`, date and time, with a few safe options (`ipconfig /all`, `netstat -ano`...). Type `cmd ipconfig` (or `ip config`, `lance la commande ping google.com`) in the chat and it runs immediately, without the model; anything else (`del`, `&`, `;`...) is refused. All are read-only, need no administrator rights, and are started without a command shell (nothing can be added behind them: no `&`, `|`, option or redirection), with a time limit, and the exact command is shown in the chat. For the target of `ping`, `nslookup` and `tracert` only a plain host name or address is accepted. To allow one more, add an entry to `COMMANDS` (read-only).
+
+**For developers.** *Git projects* (right-click menu): add the root folder of your projects and Prinny reminds you, in a bubble, when changes stay uncommitted for 3 hours, commits stay unpushed for 2 hours, or the remote moved on (counted from your last fetch; each problem is reported once, again only if it gets worse or comes back after being solved; nothing is downloaded). It only runs `git status` and `git log`, never changes anything, and turns off `core.fsmonitor` so a repository cannot start a program. Ask "where am I on Prinaka?" in the chat to see the state. He can never commit or push. *Reminders*: "remind me in 25 min to drink", "wake me at 22:30", "list my reminders", "cancel them" ring with a bubble, a sound and a system notification (so you see it even in a full-screen game). Reminders are kept in memory only and are lost when Prinaka quits.
+
+**Diagnostic.** "Why is my PC slow?", "I'm out of space", "my network lags", "do I have a virus?": Prinny reads, read-only, the most demanding programs, the disks, the network latency and Windows Defender's detections, then explains what he sees. He never closes or deletes anything himself.
+
 ## Do not disturb
 
 While Windows reports a full-screen app, game or presentation, Prinny hides and shows nothing. He comes back when it ends. Turn it off in right-click → **Options**.
@@ -114,6 +141,17 @@ Prinaka/
 │   ├── reactions.py     # When Prinny comments on something
 │   ├── quotes.py        # Localized quote picker
 │   ├── defender.py      # Windows Defender relay (detections, file scan)
+│   ├── ai.py            # Local AI: Ollama dialogue and tool calls
+│   ├── ai_tools.py      # The actions the AI is allowed to take
+│   ├── websearch.py     # The AI's web search (DuckDuckGo, Wikipedia fallback)
+│   ├── safe_commands.py # The read-only commands the AI may run
+│   ├── browsers.py      # Open a site in a browser, optionally in private browsing
+│   ├── spotify_control.py # Start Spotify and play a requested track
+│   ├── dev_tools.py       # Git projects watch and reminders (menu, bubbles)
+│   ├── git_watch.py       # Read-only git status and log of the registered projects
+│   ├── reminders.py       # Timers and reminders (in memory)
+│   ├── ai_assistant.py  # AI chat and actions (mixed into Prinny)
+│   ├── chat_window.py   # Chat window
 │   ├── fullscreen.py    # Full-screen / presentation detection
 │   ├── tray.py          # System tray icon
 │   ├── menu_style.py    # Shared look of the context menus

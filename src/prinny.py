@@ -17,6 +17,7 @@ Handles:
 import os
 import random
 import json
+import time
 
 from PyQt5 import sip
 from PyQt5.QtWidgets import (
@@ -32,6 +33,8 @@ from config import ConfigManager
 from media import get_current_media_info, SOURCE_SPOTIFY, SOURCE_ANY
 from speech_bubble import SpeechBubble
 from features import FeaturesMixin
+from ai_assistant import AssistantMixin
+from dev_tools import DevToolsMixin
 from menu_style import style_menu
 from discord_presence import (
     DiscordPresenceManager, STATUS_TEXTS, find_profile, load_profiles,
@@ -47,6 +50,9 @@ TIMER_INTERVAL  = 90        # ms between each game loop tick
 ANIM_INTERVAL   = 50        # ms between each animation frame
 GRAVITY         = 10
 WALK_SPEED      = 5
+RUN_SPEED       = 14        # when walking to a destination (see walk_to)
+RUN_JUMP_CHANCE = 0.05      # per tick, while running far from the destination
+RUN_JUMP_MIN_PX = 160
 MAX_FALL_SPEED  = 90
 FALL_SMOOTH     = 0.5
 JUMP_VELOCITY   = -50
@@ -62,7 +68,7 @@ PRESENCE_ENABLED = False
 # Prinny widget
 # ---------------------------------------------------------------------------
 
-class Prinny(FeaturesMixin, QWidget):
+class Prinny(DevToolsMixin, AssistantMixin, FeaturesMixin, QWidget):
     """
     The main animated desktop buddy widget.
 
@@ -79,6 +85,8 @@ class Prinny(FeaturesMixin, QWidget):
         "gentleman": (165, 165),
         "kurtis":    (165, 165),
         "summer":    (165, 165),
+        "golden":    (165, 165),
+        "dengeki":   (165, 165),
     }
 
     # --- System alert thresholds ---
@@ -141,6 +149,10 @@ class Prinny(FeaturesMixin, QWidget):
         self._drag_prev_pos  = QPoint()
         self._menu_active    = False
         self._forced_state   = None
+        self._goto_x         = None   # walk to this x, see walk_to()
+        self._goto_deadline  = 0.0    # monotonic time after which he gives up
+        self._jump_vx        = None   # horizontal speed of a commanded jump, None = usual
+        self._jumps_left     = 0      # commanded jumps still to do, see jump()
 
         self._walk_active    = False
         self._idle_active    = False
@@ -182,6 +194,8 @@ class Prinny(FeaturesMixin, QWidget):
 
         # --- Quotes, reactions, alerts, do-not-disturb, tray (features.py) ---
         self._init_features()
+        self._init_assistant()
+        self._init_dev_tools()
 
         # --- Info window (lazy init) ---
         self._info_window = None
@@ -426,13 +440,17 @@ class Prinny(FeaturesMixin, QWidget):
             self._vy_jump  = min(self._vy_jump, MAX_FALL_SPEED)
 
             new_y = self.y() + self._vy_jump
-            new_x = self.x() + (WALK_SPEED * 4) * self._direction
+            vx    = WALK_SPEED * 4 if self._jump_vx is None else self._jump_vx
+            new_x = self.x() + vx * self._direction
             new_x = max(total_rect.left(), min(new_x, total_rect.right() - self.width()))
+            if self._goto_x is not None:    # a jump must not carry him past his destination
+                new_x = min(new_x, self._goto_x) if self._direction > 0 else max(new_x, self._goto_x)
 
             if new_y >= ground_y:
                 new_y         = ground_y
                 self._vy_jump = 0
                 self._jumping = False
+                self._after_jump()
 
             self.move(int(new_x), int(new_y))
             self._set_anim("fall")
@@ -451,7 +469,7 @@ class Prinny(FeaturesMixin, QWidget):
             if self._forced_state == "idle":
                 self._set_anim("idle")
 
-            elif self._forced_state == "walk" or self._walk_active:
+            elif self._forced_state == "walk" or self._walk_active or self._goto_x is not None:
                 self._walk_step(total_rect)
 
             else:
@@ -469,7 +487,24 @@ class Prinny(FeaturesMixin, QWidget):
     def _walk_step(self, total_rect) -> None:
         """Move Prinny one step in the current direction, bouncing off screen edges."""
         self._set_anim("walk")
-        new_x = self.x() + WALK_SPEED * self._direction
+        speed = WALK_SPEED
+        if self._goto_x is not None:
+            distance = self._goto_x - self.x()
+            if time.monotonic() > self._goto_deadline:    # blocked or taking too long
+                self._goto_x = None
+                self._end_walk()
+                return
+            if abs(distance) <= RUN_SPEED:
+                self.move(self._goto_x, self.y())
+                self._goto_x = None
+                self._end_walk()
+                return
+            self._direction = 1 if distance > 0 else -1
+            speed = min(RUN_SPEED, abs(distance))
+            if abs(distance) > RUN_JUMP_MIN_PX and random.random() < RUN_JUMP_CHANCE:
+                self._jumping = True
+                self._vy_jump = JUMP_VELOCITY
+        new_x = self.x() + speed * self._direction
 
         if new_x <= total_rect.left():
             new_x            = total_rect.left()
@@ -520,6 +555,10 @@ class Prinny(FeaturesMixin, QWidget):
                 self._jumping  = True
                 self._vy_jump  = JUMP_VELOCITY
 
+    def _start_jump(self) -> None:
+        self._jumping = True
+        self._vy_jump = JUMP_VELOCITY
+
     def _any_behaviour_active(self) -> bool:
         """Return True if any forced or active behaviour is currently running."""
         return any([
@@ -550,6 +589,7 @@ class Prinny(FeaturesMixin, QWidget):
         self._hype_active    = False
         self._fail_active    = False
         self._forced_state   = None
+        self._goto_x         = None
 
 
     # -----------------------------------------------------------------------
@@ -717,6 +757,12 @@ class Prinny(FeaturesMixin, QWidget):
         player_action = menu.addAction(
             t("menu_player_close") if self.is_player_window_visible() else t("menu_player")
         )
+        chat_action = menu.addAction(
+            t("menu_chat_close") if self.is_chat_window_visible() else t("menu_chat")
+        )
+        web_action = QAction(t("menu_web_search"), self, checkable=True)
+        web_action.setChecked(self.config.get("web_search_enabled"))
+        menu.addAction(web_action)
         menu.addSeparator()
 
         # Behavior submenu (the forced state is checked)
@@ -738,6 +784,7 @@ class Prinny(FeaturesMixin, QWidget):
         handlers.update(self._build_dialogue_menu(menu))
         handlers.update(self._build_alert_menu(menu))
         handlers.update(self._build_security_menu(menu))
+        handlers.update(self._build_git_menu(menu))
         menu.addSeparator()
 
         # Media toggle
@@ -820,6 +867,10 @@ class Prinny(FeaturesMixin, QWidget):
             self.toggle_network_window()
         elif chosen == player_action:
             self.toggle_player_window()
+        elif chosen == chat_action:
+            self.toggle_chat_window()
+        elif chosen == web_action:
+            self.config.set("web_search_enabled", web_action.isChecked())
         elif chosen == spotify_action:
             self._spotify_only = spotify_action.isChecked()
             self.config.set("media_spotify_only", self._spotify_only)

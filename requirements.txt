@@ -2,6 +2,7 @@ PyQt5>=5.15
 psutil
 pynput
 pypresence>=4.3
+certifi
 wmi
 pywin32
 winsdk

@@ -29,7 +29,8 @@ class TrayIcon(QSystemTrayIcon):
     Args:
         owner: The Prinny widget (needs toggle_visibility, is_user_hidden,
             current_icon, is_info_window_visible, toggle_info_window,
-            is_network_window_visible, toggle_network_window and quit_app).
+            is_network_window_visible, toggle_network_window, is_chat_window_visible,
+            toggle_chat_window and quit_app).
     """
 
     def __init__(self, owner):
@@ -71,6 +72,8 @@ class TrayIcon(QSystemTrayIcon):
         self._menu.addAction(t(net_key), self._owner.toggle_network_window)
         player_key = "menu_player_close" if self._owner.is_player_window_visible() else "menu_player"
         self._menu.addAction(t(player_key), self._owner.toggle_player_window)
+        chat_key = "menu_chat_close" if self._owner.is_chat_window_visible() else "menu_chat"
+        self._menu.addAction(t(chat_key), self._owner.toggle_chat_window)
         self._menu.addSeparator()
         self._menu.addAction(t("menu_quit"), self._owner.quit_app)
 

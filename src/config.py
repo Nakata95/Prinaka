@@ -25,6 +25,12 @@ Stored settings:
 - quotes_frequency    : 'low', 'normal' or 'high' (str)
 - reactions_enabled   : contextual reactions, see reactions.py (bool)
 - defender_enabled    : relay Windows Defender detections (bool)
+- ai_model            : Ollama model used by the chat (str)
+- git_watch_enabled   : remind about git projects left uncommitted or unpushed (bool)
+- git_projects        : the projects watched, folder paths joined with '|' (str)
+- web_search_enabled  : the chat may search the web (bool)
+- search_engine_url   : search page opened in the browser, with {q} for the words (str)
+- chat_window_pos     : last position of the chat window, "x,y" (str)
 - dnd_fullscreen      : hide Prinny and stay silent during full-screen apps (bool)
 - info_window_pos     : last position of the system info window, "x,y" (str)
 - net_window_pos      : last position of the network overlay, "x,y" (str)
@@ -64,6 +70,12 @@ DEFAULTS = {
     "reactions_enabled":   True,
     "dnd_fullscreen":      True,
     "defender_enabled":    True,
+    "ai_model":            "qwen3:8b",
+    "git_watch_enabled":   True,
+    "git_projects":        "",
+    "web_search_enabled":  True,
+    "search_engine_url":   "https://duckduckgo.com/?q={q}",
+    "chat_window_pos":     "",
     "info_window_pos":     "",
     "net_window_pos":      "",
     "presence_autostart":  False,
